@@ -1,17 +1,18 @@
 import React, { useMemo } from 'react';
 import { X, Building2, Activity, Users, Shield, Zap, Thermometer, CheckCircle2, User, ChevronRight } from 'lucide-react';
 import { useColony } from '../../context/ColonyContext';
+import { useCitizen } from '../../context/CitizenContext';
 import { DISTRICTS } from '../../data/districts';
-import { citizenService } from '../../lib/citizenService';
 import { citizenToCitizenData } from '../../lib/citizenAdapter';
 
 export const BuildingInfoPanel: React.FC = () => {
   const { selectedBuilding, selectBuilding, selectCitizen, resetCamera } = useColony();
+  const { getCitizensByBuildingId } = useCitizen();
 
   const occupants = useMemo(() => {
     if (!selectedBuilding) return [];
-    return citizenService.getByBuildingId(selectedBuilding.id);
-  }, [selectedBuilding]);
+    return getCitizensByBuildingId(selectedBuilding.id);
+  }, [selectedBuilding, getCitizensByBuildingId]);
 
   if (!selectedBuilding) return null;
 
@@ -123,6 +124,11 @@ export const BuildingInfoPanel: React.FC = () => {
                 </div>
 
                 <div className="flex items-center gap-1.5">
+                  {citizen.isDemo && (
+                    <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60">
+                      DEMO
+                    </span>
+                  )}
                   <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-slate-800 text-cyan-300">
                     {citizen.citizenId}
                   </span>

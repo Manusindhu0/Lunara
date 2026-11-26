@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import {
   ArrowLeft,
@@ -7,34 +7,80 @@ import {
   Check,
   Share2,
   MapPin,
-  Building2,
-  Calendar,
   Activity,
   Award,
-  Zap,
   Shield,
+  ShieldCheck,
   Coins,
-  Globe2,
-  Sparkles,
   Trophy,
   BarChart3,
-  ExternalLink,
-  Flame
+  Flame,
+  RefreshCw,
 } from 'lucide-react';
 import { useCitizen } from '../context/CitizenContext';
+import { citizenService } from '../lib/citizenService';
+import { AccountMenu } from '../components/ui/AccountMenu';
 import { DISTRICTS } from '../data/districts';
 import { DEPARTMENTS } from '../data/departments';
 import { BUILDINGS } from '../data/buildings';
+import { Citizen } from '../types';
 
 export const CitizenProfilePage: React.FC = () => {
   const { citizenId } = useParams<{ citizenId: string }>();
   const navigate = useNavigate();
   const { getCitizenById } = useCitizen();
 
+  const cachedCitizen = citizenId ? getCitizenById(citizenId) : undefined;
+  const [remoteCitizen, setRemoteCitizen] = useState<Citizen | null>(null);
+  const [isFetching, setIsFetching] = useState<boolean>(
+    Boolean(citizenId && !cachedCitizen && !citizenId.toUpperCase().startsWith('SIM-'))
+  );
+
   const [copiedId, setCopiedId] = useState(false);
   const [copiedUrl, setCopiedUrl] = useState(false);
 
-  const citizen = citizenId ? getCitizenById(citizenId) : undefined;
+  useEffect(() => {
+    if (!citizenId) {
+      setIsFetching(false);
+      return;
+    }
+
+    // Always resolve SIM-* from demo store; for LUN-* fetch fresh public DTO if not cached
+    if (citizenId.toUpperCase().startsWith('SIM-')) {
+      setRemoteCitizen(null);
+      setIsFetching(false);
+      return;
+    }
+
+    let cancelled = false;
+    if (!cachedCitizen) {
+      setIsFetching(true);
+    }
+
+    citizenService
+      .fetchPublicCitizenById(citizenId)
+      .then((found) => {
+        if (!cancelled) {
+          setRemoteCitizen(found);
+        }
+      })
+      .catch(() => {
+        if (!cancelled) {
+          setRemoteCitizen(null);
+        }
+      })
+      .finally(() => {
+        if (!cancelled) {
+          setIsFetching(false);
+        }
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [citizenId, cachedCitizen]);
+
+  const citizen = remoteCitizen ?? cachedCitizen;
 
   const handleCopyId = () => {
     if (!citizen) return;
@@ -60,7 +106,7 @@ export const CitizenProfilePage: React.FC = () => {
     if (navigator.share) {
       try {
         await navigator.share(shareData);
-      } catch (err) {
+      } catch {
         handleCopyUrl();
       }
     } else {
@@ -68,10 +114,25 @@ export const CitizenProfilePage: React.FC = () => {
     }
   };
 
-  // If citizen not found
+  if (isFetching && !citizen) {
+    return (
+      <div className="h-screen overflow-y-auto bg-[#05070a] text-slate-100 flex flex-col items-center justify-center p-6 font-mono">
+        <div className="max-w-sm w-full bg-slate-950 border border-slate-800 rounded-2xl p-8 text-center shadow-2xl">
+          <RefreshCw className="w-8 h-8 text-cyan-400 animate-spin mx-auto mb-3" />
+          <div className="font-chakra text-lg font-bold text-white">
+            Retrieving Citizen Dossier
+          </div>
+          <div className="text-xs text-slate-400 mt-1">
+            Querying Selenia Prime registry for {citizenId}...
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   if (!citizen) {
     return (
-      <div className="min-h-screen bg-[#05070a] text-slate-100 flex flex-col items-center justify-center p-6 font-mono">
+      <div className="h-screen overflow-y-auto bg-[#05070a] text-slate-100 flex flex-col items-center justify-center p-6 font-mono">
         <div className="max-w-md w-full bg-slate-950 border border-slate-800 rounded-2xl p-8 text-center shadow-2xl">
           <div className="w-16 h-16 rounded-2xl bg-rose-950/60 border border-rose-800/80 flex items-center justify-center mx-auto mb-4 text-rose-400">
             <Shield className="w-8 h-8" />
@@ -97,16 +158,15 @@ export const CitizenProfilePage: React.FC = () => {
   const district = DISTRICTS[citizen.districtId];
   const department = DEPARTMENTS[citizen.department];
   const building = BUILDINGS.find((b) => b.id === citizen.buildingId);
+  const isDemo = Boolean(citizen.isDemo);
 
-  // XP calculation for next level (every 100 XP is 1 level)
   const currentLevelBaseXp = (citizen.level - 1) * 100;
-  const nextLevelXp = citizen.level * 100;
   const progressPercent = Math.min(100, Math.max(0, ((citizen.xp - currentLevelBaseXp) / 100) * 100));
 
   return (
-    <div className="min-h-screen bg-[#05070a] text-slate-100 flex flex-col font-sans pb-16">
+    <div className="h-screen overflow-y-auto bg-[#05070a] text-slate-100 flex flex-col font-sans pb-16 select-text">
       {/* Top Navigation */}
-      <header className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-xl border-b border-slate-800/80 px-6 py-4 flex items-center justify-between">
+      <header className="sticky top-0 z-30 bg-slate-950/85 backdrop-blur-xl border-b border-slate-800/80 px-6 py-4 flex items-center justify-between gap-3">
         <div className="flex items-center gap-4">
           <button
             onClick={() => navigate('/citizens')}
@@ -133,7 +193,7 @@ export const CitizenProfilePage: React.FC = () => {
             title="Share Citizen Dossier"
           >
             <Share2 className="w-3.5 h-3.5" />
-            <span>{copiedUrl ? 'LINK COPIED!' : 'SHARE'}</span>
+            <span className="hidden sm:inline">{copiedUrl ? 'LINK COPIED!' : 'SHARE'}</span>
           </button>
 
           <button
@@ -141,8 +201,11 @@ export const CitizenProfilePage: React.FC = () => {
             className="flex items-center gap-2 px-4 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 border border-cyan-400 text-xs font-mono font-bold text-white transition-all shadow-lg shadow-cyan-950/40"
           >
             <Compass className="w-4 h-4" />
-            <span>LOCATE IN 3D WORLD</span>
+            <span className="hidden sm:inline">LOCATE IN 3D WORLD</span>
+            <span className="sm:hidden">3D VIEW</span>
           </button>
+
+          <AccountMenu citizenshipPath="/citizenship" />
         </div>
       </header>
 
@@ -150,31 +213,25 @@ export const CitizenProfilePage: React.FC = () => {
       <main className="max-w-6xl mx-auto w-full px-6 pt-8">
         {/* Identity Banner Card */}
         <div className="bg-slate-950/90 border border-slate-800/90 rounded-3xl p-6 md:p-8 shadow-2xl relative overflow-hidden mb-8">
-          {/* Subtle accent backdrop glow */}
           <div
             className="absolute -top-24 -right-24 w-80 h-80 rounded-full blur-3xl opacity-20 pointer-events-none"
             style={{ backgroundColor: department?.accentColor || '#38bdf8' }}
           />
 
           <div className="flex flex-col md:flex-row items-start md:items-center justify-between gap-6 relative z-10">
-            {/* Left: Astronaut Portrait & Identity */}
             <div className="flex items-center gap-6">
-              {/* Futuristic EVA Suit Portrait Frame */}
               <div className="w-24 h-24 md:w-28 md:h-28 rounded-2xl bg-slate-900 border-2 border-slate-700/80 flex items-center justify-center relative overflow-hidden shadow-2xl shrink-0">
                 <div
                   className="w-16 h-16 md:w-20 md:h-20 rounded-full border-4 border-slate-400/80 relative flex items-center justify-center shadow-inner"
                   style={{ backgroundColor: citizen.suitColor }}
                 >
-                  {/* Visor reflecting ambient lunar gold */}
                   <div className="w-9 h-9 md:w-11 md:h-11 rounded-full bg-gradient-to-tr from-amber-500 via-amber-300 to-amber-100 opacity-90 shadow-lg" />
                 </div>
-                {/* Status Dot */}
                 <span className="absolute bottom-2 right-2 w-3.5 h-3.5 rounded-full bg-emerald-400 border-2 border-slate-950 animate-pulse" />
               </div>
 
               <div>
                 <div className="flex items-center gap-2 flex-wrap mb-1">
-                  {/* Citizen ID Pill with copy */}
                   <button
                     onClick={handleCopyId}
                     className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-cyan-950 text-cyan-300 border border-cyan-800/80 font-mono text-xs font-bold hover:bg-cyan-900 transition-colors"
@@ -191,6 +248,17 @@ export const CitizenProfilePage: React.FC = () => {
                   <span className="text-xs font-mono text-slate-400">
                     @{citizen.username}
                   </span>
+
+                  {isDemo ? (
+                    <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-amber-950/90 text-amber-300 border border-amber-800/80 font-bold">
+                      DEMO SHOWCASE
+                    </span>
+                  ) : (
+                    <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-emerald-950/90 text-emerald-300 border border-emerald-800/80 font-bold flex items-center gap-1">
+                      <ShieldCheck className="w-3 h-3 text-emerald-400" />
+                      VERIFIED CITIZEN
+                    </span>
+                  )}
 
                   {citizen.isFoundingCitizen && (
                     <span className="text-[11px] font-mono px-2.5 py-0.5 rounded-full bg-amber-950/90 text-amber-300 border border-amber-800/80 font-bold flex items-center gap-1">
@@ -216,7 +284,6 @@ export const CitizenProfilePage: React.FC = () => {
               </div>
             </div>
 
-            {/* Right: Status & Quick Action */}
             <div className="flex flex-col sm:flex-row md:flex-col items-start md:items-end gap-3 shrink-0">
               <div className="flex items-center gap-2 font-mono text-xs">
                 <span className="px-3 py-1 rounded-lg bg-emerald-950/80 border border-emerald-800/80 text-emerald-300 font-bold flex items-center gap-1.5">
@@ -246,7 +313,6 @@ export const CitizenProfilePage: React.FC = () => {
 
         {/* Grid Layout: 2 Columns */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Left Column: Civic Profile, Location, Progression */}
           <div className="lg:col-span-1 space-y-6">
             {/* Progression & Economy Card */}
             <div className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-6 shadow-xl font-mono">
@@ -260,7 +326,6 @@ export const CitizenProfilePage: React.FC = () => {
                 </span>
               </div>
 
-              {/* XP Bar */}
               <div className="mb-4">
                 <div className="flex items-center justify-between text-xs text-slate-400 mb-1.5">
                   <span>Colony XP Progress</span>
@@ -278,7 +343,6 @@ export const CitizenProfilePage: React.FC = () => {
                 </div>
               </div>
 
-              {/* Economy: Colony Credits */}
               <div className="p-3.5 bg-slate-900/80 border border-slate-800 rounded-xl flex items-center justify-between">
                 <div className="flex items-center gap-2.5">
                   <div className="w-8 h-8 rounded-lg bg-amber-950/80 border border-amber-800/80 flex items-center justify-center text-amber-400">
@@ -355,9 +419,7 @@ export const CitizenProfilePage: React.FC = () => {
             </div>
           </div>
 
-          {/* Right Column: Bio, Achievements, Contribution Stats */}
           <div className="lg:col-span-2 space-y-6">
-            {/* Bio Card */}
             <div className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-6 md:p-8 shadow-xl">
               <h3 className="font-chakra text-base font-bold text-white tracking-wider uppercase mb-3 flex items-center gap-2">
                 <Shield className="w-4 h-4 text-cyan-400" />
@@ -368,7 +430,6 @@ export const CitizenProfilePage: React.FC = () => {
               </p>
             </div>
 
-            {/* Contribution Metrics Grid */}
             <div className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-6 md:p-8 shadow-xl font-mono">
               <h3 className="font-chakra text-base font-bold text-white tracking-wider uppercase mb-4 flex items-center gap-2">
                 <BarChart3 className="w-4 h-4 text-emerald-400" />
@@ -395,7 +456,7 @@ export const CitizenProfilePage: React.FC = () => {
                 <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5">
                   <div className="text-[10px] text-slate-400 uppercase">EVA Sessions</div>
                   <div className="text-2xl font-bold text-amber-400 mt-1">
-                    {citizen.contributionStats.evaSessions ?? 4}
+                    {citizen.contributionStats.evaSessions ?? 0}
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5">Regolith Hours</div>
                 </div>
@@ -403,14 +464,13 @@ export const CitizenProfilePage: React.FC = () => {
                 <div className="bg-slate-900/60 border border-slate-800 rounded-xl p-3.5">
                   <div className="text-[10px] text-slate-400 uppercase">Discoveries</div>
                   <div className="text-2xl font-bold text-indigo-400 mt-1">
-                    {citizen.contributionStats.discoveryCount ?? 2}
+                    {citizen.contributionStats.discoveryCount ?? 0}
                   </div>
                   <div className="text-[10px] text-slate-400 mt-0.5">Catalogued</div>
                 </div>
               </div>
             </div>
 
-            {/* Achievements Showcase */}
             <div className="bg-slate-950/80 border border-slate-800/80 rounded-2xl p-6 md:p-8 shadow-xl">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-chakra text-base font-bold text-white tracking-wider uppercase flex items-center gap-2">

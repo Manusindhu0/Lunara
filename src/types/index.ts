@@ -107,9 +107,9 @@ export interface ContributionStats {
 // ---- Phase 2: Core Citizen (data-layer record) ----
 
 export interface Citizen {
-  // Internal system identity
-  _internalId: string;      // UUID, never shown publicly
-  citizenId: string;        // "LUN-00001" — permanent, never recycled
+  // Internal system identity (omitted on public API responses)
+  _internalId?: string;     // UUID, never shown publicly
+  citizenId: string;        // "LUN-00001" (live) or "SIM-00001" (demo) — permanent, never recycled
   
   // Public identity
   username: string;         // unique, changeable
@@ -144,6 +144,7 @@ export interface Citizen {
   
   // Flags
   isFoundingCitizen: boolean;
+  isDemo?: boolean;         // true for Phase 2 simulation showcase citizens (SIM-*), false for PostgreSQL citizens (LUN-*)
   
   // Statistics
   contributionStats: ContributionStats;
@@ -169,6 +170,7 @@ export interface CitizenData {
   joinDate: string;
   biography: string;
   badges: string[];  // achievement names
+  isDemo?: boolean;  // true for SIM-* showcase citizens
 }
 
 export type CameraViewPreset = 'overview' | 'district' | 'inspection';

@@ -1,24 +1,20 @@
 import React, { useState, useMemo } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Navigate, useNavigate } from 'react-router-dom';
 import {
-  ArrowLeft,
   ArrowRight,
   CheckCircle2,
   AlertCircle,
-  Sparkles,
+  FlaskConical,
   Shield,
-  User,
   Compass,
-  Palette,
-  Briefcase,
-  FileText,
   Rocket,
   Award,
-  Check,
   Zap,
-  Globe2
+  ShieldCheck,
 } from 'lucide-react';
+import { useAuth } from '../context/AuthContext';
 import { useCitizen } from '../context/CitizenContext';
+import { AccountMenu } from '../components/ui/AccountMenu';
 import { DEPARTMENTS } from '../data/departments';
 import { DepartmentId, AstronautType, Citizen } from '../types';
 
@@ -44,12 +40,11 @@ const ASTRONAUT_TYPES: { id: AstronautType; label: string; desc: string }[] = [
 
 export const JoinPage: React.FC = () => {
   const navigate = useNavigate();
-  const { registerCitizen, isUsernameTaken } = useCitizen();
+  const { isAuthenticated, isLoading: isAuthLoading } = useAuth();
+  const { registerDemoPreview, isUsernameTaken, citizens } = useCitizen();
 
-  // Wizard Step: 1 (Welcome) -> 2 (Callsign) -> 3 (Bio) -> 4 (Dept) -> 5 (Profession) -> 6 (Suit) -> 7 (Review) -> 8 (Arrival Animation / Granted)
   const [step, setStep] = useState<number>(1);
 
-  // Form State
   const [username, setUsername] = useState('');
   const [displayName, setDisplayName] = useState('');
   const [bio, setBio] = useState('');
@@ -58,33 +53,39 @@ export const JoinPage: React.FC = () => {
   const [astronautType, setAstronautType] = useState<AstronautType>('engineer');
   const [suitColor, setSuitColor] = useState<string>('#ffffff');
 
-  // Registration result
   const [registeredCitizen, setRegisteredCitizen] = useState<Citizen | null>(null);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [submitError, setSubmitError] = useState<string | null>(null);
   const [arrivalStage, setArrivalStage] = useState<'descending' | 'touchdown' | 'complete'>('descending');
 
-  // Real-time username validation
   const usernameClean = username.trim().toLowerCase().replace(/\s+/g, '_');
-  const isUsernameValid = /^[a-zA-Z0-9_]{3,20}$/.test(usernameClean);
+  const isUsernameValid = /^[a-z0-9_]{3,20}$/.test(usernameClean);
   const usernameTaken = useMemo(() => {
     if (!usernameClean || !isUsernameValid) return false;
-    return isUsernameTaken(usernameClean);
-  }, [usernameClean, isUsernameValid, isUsernameTaken]);
+    return (
+      isUsernameTaken(usernameClean) ||
+      citizens.some((c) => c.username.toLowerCase() === usernameClean)
+    );
+  }, [usernameClean, isUsernameValid, isUsernameTaken, citizens]);
 
   const isStep2Valid = isUsernameValid && !usernameTaken && displayName.trim().length >= 2;
   const isStep3Valid = bio.trim().length >= 10;
 
-  // Handle department change -> reset profession to first available
+  // Authenticated accounts route directly into the official Phase 3 Citizenship Terminal
+  if (!isAuthLoading && isAuthenticated) {
+    return <Navigate to="/citizenship" replace />;
+  }
+
   const handleDeptSelect = (deptId: DepartmentId) => {
     setDepartment(deptId);
     setProfession(DEPARTMENTS[deptId].professions[0]);
   };
 
-  // Submit registration
-  const handleRegister = () => {
+  const handleDemoPreviewRegister = () => {
     setIsSubmitting(true);
+    setSubmitError(null);
     try {
-      const citizen = registerCitizen({
+      const citizen = registerDemoPreview({
         username: usernameClean,
         displayName: displayName.trim(),
         bio: bio.trim(),
@@ -94,17 +95,16 @@ export const JoinPage: React.FC = () => {
         suitColor,
       });
       setRegisteredCitizen(citizen);
-      setStep(8); // Go to Arrival sequence
+      setStep(8);
 
-      // Dramatic timed arrival steps
-      setTimeout(() => {
+      window.setTimeout(() => {
         setArrivalStage('touchdown');
-      }, 1800);
-      setTimeout(() => {
+      }, 1500);
+      window.setTimeout(() => {
         setArrivalStage('complete');
-      }, 3400);
-    } catch (err: any) {
-      alert(err.message || 'Registration failed');
+      }, 3000);
+    } catch (err) {
+      setSubmitError(err instanceof Error ? err.message : 'Demo preview failed');
     } finally {
       setIsSubmitting(false);
     }
@@ -113,9 +113,9 @@ export const JoinPage: React.FC = () => {
   const chosenDeptInfo = DEPARTMENTS[department];
 
   return (
-    <div className="min-h-screen bg-[#05070a] text-slate-100 flex flex-col font-sans">
+    <div className="h-screen overflow-y-auto bg-[#05070a] text-slate-100 flex flex-col font-sans select-text">
       {/* Top Bar */}
-      <header className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-xl border-b border-slate-800/80 px-6 py-4 flex items-center justify-between">
+      <header className="sticky top-0 z-30 bg-slate-950/85 backdrop-blur-xl border-b border-slate-800/80 px-6 py-4 flex items-center justify-between gap-4">
         <button
           onClick={() => navigate('/world')}
           className="flex items-center gap-3 group focus:outline-none"
@@ -130,123 +130,166 @@ export const JoinPage: React.FC = () => {
               <span className="font-chakra tracking-[0.25em] text-lg font-bold text-white group-hover:text-cyan-400 transition-colors">
                 LUNAR
               </span>
-              <span className="text-[10px] font-mono tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold">
-                ENLISTMENT
+              <span className="text-[10px] font-mono tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 font-semibold">
+                DEMO PREVIEW
               </span>
             </div>
-            <div className="text-[11px] font-mono text-slate-400">
-              Civilian & Specialist Onboarding Protocol
+            <div className="text-[11px] font-mono text-slate-400 hidden sm:block">
+              Interactive Onboarding Preview Sandbox
             </div>
           </div>
         </button>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
+          <button
+            onClick={() => navigate('/citizenship')}
+            className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-xs font-mono font-bold text-white transition-colors"
+          >
+            <ShieldCheck className="w-4 h-4" />
+            <span className="hidden sm:inline">REAL CITIZENSHIP</span>
+          </button>
+
           <button
             onClick={() => navigate('/citizens')}
-            className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-300 hover:text-white transition-colors"
+            className="hidden md:flex items-center gap-2 px-3 py-2 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-300 hover:text-white transition-colors"
           >
             <span>VIEW DIRECTORY</span>
           </button>
+
+          <AccountMenu citizenshipPath="/citizenship" />
         </div>
       </header>
 
       {/* Main Container */}
-      <main className="flex-1 max-w-4xl mx-auto w-full px-6 py-8 flex flex-col justify-center">
+      <main className="flex-1 max-w-4xl mx-auto w-full px-6 py-8 pb-16 flex flex-col justify-center">
+        {/* Official Real Citizenship Prompt Banner */}
+        <div className="mb-6 p-4 md:p-5 rounded-2xl bg-cyan-950/30 border border-cyan-700/60 flex flex-col sm:flex-row sm:items-center justify-between gap-4">
+          <div className="flex items-start gap-3">
+            <ShieldCheck className="w-5 h-5 text-cyan-400 shrink-0 mt-0.5" />
+            <div>
+              <div className="font-chakra text-sm font-bold text-white uppercase tracking-wide">
+                Applying for Official LUNAR Citizenship (<code className="text-cyan-300 font-mono">LUN-XXXXX</code>)?
+              </div>
+              <p className="text-xs font-mono text-slate-300 mt-0.5">
+                Real citizenship records require verified email, social connection, and server eligibility clearance at the Citizenship Terminal.
+              </p>
+            </div>
+          </div>
+
+          <button
+            type="button"
+            onClick={() => navigate('/citizenship')}
+            className="shrink-0 px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-chakra text-xs font-bold tracking-wider uppercase flex items-center justify-center gap-2 shadow-lg shadow-cyan-950/50"
+          >
+            <span>Open /citizenship</span>
+            <ArrowRight className="w-4 h-4" />
+          </button>
+        </div>
+
         {/* Step Indicator (Steps 1-7) */}
         {step < 8 && (
           <div className="mb-8">
             <div className="flex items-center justify-between text-xs font-mono text-slate-400 mb-2">
-              <span>STEP {step} OF 7</span>
-              <span className="text-cyan-400 font-semibold">
+              <span>DEMO PREVIEW STEP {step} OF 7</span>
+              <span className="text-amber-300 font-semibold">
                 {
                   [
-                    'Briefing',
+                    'Demo Preview Briefing',
                     'Callsign & Identity',
                     'Civic Biography',
                     'Department',
                     'Specialization',
                     'EVA Suit Specs',
-                    'Identity Review',
+                    'Preview Review',
                   ][step - 1]
                 }
               </span>
             </div>
             <div className="w-full h-1.5 bg-slate-900 rounded-full overflow-hidden border border-slate-800">
               <div
-                className="h-full bg-gradient-to-r from-cyan-500 to-indigo-500 transition-all duration-300"
+                className="h-full bg-gradient-to-r from-amber-500 to-cyan-500 transition-all duration-300"
                 style={{ width: `${(step / 7) * 100}%` }}
               />
             </div>
           </div>
         )}
 
-        {/* STEP 1: Welcome & Mission Briefing */}
+        {/* STEP 1: Welcome & Demo Briefing */}
         {step === 1 && (
           <div className="bg-slate-950/90 border border-slate-800/90 rounded-3xl p-8 md:p-12 shadow-2xl text-center relative overflow-hidden">
-            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-cyan-950/80 border border-cyan-800/80 text-cyan-400 text-xs font-mono font-bold mb-4">
-              <Sparkles className="w-3.5 h-3.5" />
-              PROTOTYPE CITIZEN REGISTRATION
+            <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-amber-950/80 border border-amber-800/80 text-amber-300 text-xs font-mono font-bold mb-4">
+              <FlaskConical className="w-3.5 h-3.5" />
+              DEMO PREVIEW SANDBOX (IN-MEMORY ONLY)
             </div>
 
             <h1 className="font-chakra text-3xl md:text-5xl font-extrabold text-white tracking-wide leading-tight">
-              Become a Citizen of <span className="text-cyan-400">LUNAR</span>
+              Preview <span className="text-cyan-400">LUNAR</span> Enlistment
             </h1>
 
             <p className="text-slate-300 text-sm md:text-base mt-4 max-w-xl mx-auto leading-relaxed">
-              Step onto the lunar surface at Selenia Prime. You will be assigned a permanent, non-recyclable
-              Citizen ID, a 3D astronaut avatar placed within the colony, and an active role across one of our six districts.
+              Explore the citizen onboarding flow in-memory (<code className="text-amber-300 font-mono">SIM-9XXXX</code>) before signing in, or head directly to the official Citizenship Terminal to claim a permanent <code className="text-cyan-300 font-mono">LUN-XXXXX</code> record.
             </p>
 
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-4 max-w-2xl mx-auto my-8 font-mono text-xs text-left">
               <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
                 <Shield className="w-5 h-5 text-cyan-400 mb-2" />
-                <div className="font-bold text-white mb-1">Permanent ID</div>
+                <div className="font-bold text-white mb-1">Official Route</div>
                 <div className="text-slate-400 text-[11px]">
-                  Unique <code className="text-cyan-300">LUN-XXXXX</code> token tied to your identity forever.
+                  Permanent <code className="text-cyan-300">LUN-XXXXX</code> IDs are issued exclusively via <code className="text-cyan-300">/citizenship</code>.
                 </div>
               </div>
 
               <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
                 <Compass className="w-5 h-5 text-amber-400 mb-2" />
-                <div className="font-bold text-white mb-1">3D World Avatar</div>
+                <div className="font-bold text-white mb-1">3D Sandbox Avatar</div>
                 <div className="text-slate-400 text-[11px]">
-                  A physically-rendered astronaut placed on the lunar regolith.
+                  Test suit colors & district placement temporarily in your current session.
                 </div>
               </div>
 
               <div className="p-4 rounded-2xl bg-slate-900/60 border border-slate-800">
                 <Award className="w-5 h-5 text-emerald-400 mb-2" />
-                <div className="font-bold text-white mb-1">Founding Rights</div>
+                <div className="font-bold text-white mb-1">Non-Persistent</div>
                 <div className="text-slate-400 text-[11px]">
-                  First 100 registrants gain permanent Founding Pioneer status.
+                  Demo previews never write to PostgreSQL or localStorage.
                 </div>
               </div>
             </div>
 
-            <button
-              onClick={() => setStep(2)}
-              className="inline-flex items-center gap-2 px-8 py-3.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-chakra text-base font-bold transition-all shadow-xl shadow-cyan-950/50"
-            >
-              <span>BEGIN ENLISTMENT PROTOCOL</span>
-              <ArrowRight className="w-5 h-5" />
-            </button>
+            <div className="flex flex-col sm:flex-row items-center justify-center gap-3">
+              <button
+                onClick={() => navigate('/citizenship')}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-7 py-3.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-chakra text-sm font-bold transition-all shadow-xl shadow-cyan-950/50"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>GO TO REAL CITIZENSHIP</span>
+              </button>
+
+              <button
+                onClick={() => setStep(2)}
+                className="w-full sm:w-auto inline-flex items-center justify-center gap-2 px-6 py-3.5 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-amber-300 font-chakra text-sm font-bold transition-all"
+              >
+                <span>TRY DEMO PREVIEW</span>
+                <ArrowRight className="w-4 h-4" />
+              </button>
+            </div>
           </div>
         )}
 
-        {/* STEP 2: Username & Display Name */}
+        {/* STEP 2 */}
         {step === 2 && (
           <div className="bg-slate-950/90 border border-slate-800/90 rounded-3xl p-8 shadow-2xl">
             <h2 className="font-chakra text-2xl font-bold text-white mb-1">
-              Call Sign & Display Identity
+              Preview Call Sign & Display Identity
             </h2>
             <p className="text-xs font-mono text-slate-400 mb-6">
-              Your username is your unique comms handle. Your display name is how personnel address you in person.
+              Temporary simulation callsign for Demo Preview only.
             </p>
 
             <div className="space-y-5">
               <div>
                 <label className="block text-xs font-mono text-slate-300 mb-1.5 uppercase font-semibold">
-                  Unique Username / Call Sign
+                  Preview Username / Call Sign
                 </label>
                 <div className="relative">
                   <span className="absolute left-3.5 top-1/2 -translate-y-1/2 font-mono text-slate-500 text-sm">
@@ -256,8 +299,8 @@ export const JoinPage: React.FC = () => {
                     type="text"
                     value={username}
                     onChange={(e) => setUsername(e.target.value)}
-                    placeholder="e.g. neil_armstrong"
-                    className="w-full pl-8 pr-10 py-3 bg-slate-900 border border-slate-750 rounded-xl text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
+                    placeholder="e.g. demo_pioneer"
+                    className="w-full pl-8 pr-10 py-3 bg-slate-900 border border-slate-700 rounded-xl text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
                   />
                   {usernameClean && (
                     <div className="absolute right-3.5 top-1/2 -translate-y-1/2">
@@ -271,12 +314,12 @@ export const JoinPage: React.FC = () => {
                 </div>
                 {usernameClean && !isUsernameValid && (
                   <div className="text-[11px] font-mono text-rose-400 mt-1">
-                    Username must be 3-20 characters, alphanumeric & underscore only.
+                    Username must be 3-20 characters, lowercase alphanumeric & underscore only.
                   </div>
                 )}
                 {usernameTaken && (
                   <div className="text-[11px] font-mono text-rose-400 mt-1">
-                    This username is already claimed by an active lunar citizen.
+                    This username is already present in the current roster.
                   </div>
                 )}
               </div>
@@ -289,8 +332,8 @@ export const JoinPage: React.FC = () => {
                   type="text"
                   value={displayName}
                   onChange={(e) => setDisplayName(e.target.value)}
-                  placeholder="e.g. Commander Neil Armstrong"
-                  className="w-full px-4 py-3 bg-slate-900 border border-slate-750 rounded-xl text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
+                  placeholder="e.g. Demo Pioneer"
+                  className="w-full px-4 py-3 bg-slate-900 border border-slate-700 rounded-xl text-sm font-mono text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500"
                 />
               </div>
             </div>
@@ -318,14 +361,14 @@ export const JoinPage: React.FC = () => {
           </div>
         )}
 
-        {/* STEP 3: Civic Biography */}
+        {/* STEP 3 */}
         {step === 3 && (
           <div className="bg-slate-950/90 border border-slate-800/90 rounded-3xl p-8 shadow-2xl">
             <h2 className="font-chakra text-2xl font-bold text-white mb-1">
               Civic Record & Mission Statement
             </h2>
             <p className="text-xs font-mono text-slate-400 mb-6">
-              Describe your background, specialty, and purpose on the lunar surface (minimum 10 characters).
+              Describe your background and purpose on the lunar surface (minimum 10 characters).
             </p>
 
             <div>
@@ -333,8 +376,8 @@ export const JoinPage: React.FC = () => {
                 rows={5}
                 value={bio}
                 onChange={(e) => setBio(e.target.value)}
-                placeholder="e.g. Former orbital architect dedicated to expanding regolith sintered dome infrastructure across Selenia Prime..."
-                className="w-full p-4 bg-slate-900 border border-slate-750 rounded-xl text-sm font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 leading-relaxed"
+                placeholder="e.g. Orbital systems architect testing Selenia Prime surface coordinates..."
+                className="w-full p-4 bg-slate-900 border border-slate-700 rounded-xl text-sm font-sans text-white placeholder-slate-600 focus:outline-none focus:border-cyan-500 leading-relaxed"
               />
               <div className="flex justify-between text-[11px] font-mono text-slate-500 mt-1">
                 <span>Minimum 10 characters</span>
@@ -367,14 +410,14 @@ export const JoinPage: React.FC = () => {
           </div>
         )}
 
-        {/* STEP 4: Department Assignment */}
+        {/* STEP 4 */}
         {step === 4 && (
           <div className="bg-slate-950/90 border border-slate-800/90 rounded-3xl p-8 shadow-2xl">
             <h2 className="font-chakra text-2xl font-bold text-white mb-1">
               Department Enlistment
             </h2>
             <p className="text-xs font-mono text-slate-400 mb-6">
-              Choose your department. This determines your primary district station and career path.
+              Choose your department to determine your district assignment.
             </p>
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-3.5">
@@ -391,19 +434,14 @@ export const JoinPage: React.FC = () => {
                     }`}
                   >
                     <div className="flex items-center justify-between mb-1.5">
-                      <span
-                        className="font-chakra text-base font-bold"
-                        style={{ color: dept.accentColor }}
-                      >
+                      <span className="font-chakra text-base font-bold" style={{ color: dept.accentColor }}>
                         {dept.name}
                       </span>
                       <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-slate-800 text-slate-300">
                         {dept.primaryDistrictId}
                       </span>
                     </div>
-                    <p className="text-xs text-slate-400 leading-relaxed">
-                      {dept.description}
-                    </p>
+                    <p className="text-xs text-slate-400 leading-relaxed">{dept.description}</p>
                   </div>
                 );
               })}
@@ -427,14 +465,14 @@ export const JoinPage: React.FC = () => {
           </div>
         )}
 
-        {/* STEP 5: Specialization / Profession */}
+        {/* STEP 5 */}
         {step === 5 && (
           <div className="bg-slate-950/90 border border-slate-800/90 rounded-3xl p-8 shadow-2xl">
             <h2 className="font-chakra text-2xl font-bold text-white mb-1">
               Select Your Specialization
             </h2>
             <p className="text-xs font-mono text-slate-400 mb-6">
-              Designated roles within the <span className="text-cyan-400 font-bold">{chosenDeptInfo.name}</span> department.
+              Designated roles within <span className="text-cyan-400 font-bold">{chosenDeptInfo.name}</span>.
             </p>
 
             <div className="space-y-2.5">
@@ -461,9 +499,7 @@ export const JoinPage: React.FC = () => {
                       <span className="font-mono text-sm font-semibold">{prof}</span>
                     </div>
 
-                    <span className="text-[10px] font-mono text-slate-500 uppercase">
-                      RANK: CITIZEN
-                    </span>
+                    <span className="text-[10px] font-mono text-slate-500 uppercase">RANK: CITIZEN</span>
                   </div>
                 );
               })}
@@ -487,17 +523,16 @@ export const JoinPage: React.FC = () => {
           </div>
         )}
 
-        {/* STEP 6: EVA Suit Customization */}
+        {/* STEP 6 */}
         {step === 6 && (
           <div className="bg-slate-950/90 border border-slate-800/90 rounded-3xl p-8 shadow-2xl">
             <h2 className="font-chakra text-2xl font-bold text-white mb-1">
               EVA Suit Customization
             </h2>
             <p className="text-xs font-mono text-slate-400 mb-6">
-              Configure your pressurized surface suit and astronaut specialization type.
+              Configure your surface suit and astronaut specialization class.
             </p>
 
-            {/* Astronaut Type */}
             <div className="mb-6">
               <label className="block text-xs font-mono text-slate-300 mb-2 uppercase font-semibold">
                 Astronaut Class
@@ -515,19 +550,14 @@ export const JoinPage: React.FC = () => {
                           : 'bg-slate-900/40 border-slate-800 hover:border-slate-700'
                       }`}
                     >
-                      <div className="font-chakra text-sm font-bold text-white mb-0.5">
-                        {type.label}
-                      </div>
-                      <div className="text-[10px] text-slate-400 line-clamp-2">
-                        {type.desc}
-                      </div>
+                      <div className="font-chakra text-sm font-bold text-white mb-0.5">{type.label}</div>
+                      <div className="text-[10px] text-slate-400 line-clamp-2">{type.desc}</div>
                     </div>
                   );
                 })}
               </div>
             </div>
 
-            {/* Suit Color */}
             <div>
               <label className="block text-xs font-mono text-slate-300 mb-2 uppercase font-semibold">
                 Suit Color Palette
@@ -567,35 +597,36 @@ export const JoinPage: React.FC = () => {
                 onClick={() => setStep(7)}
                 className="px-6 py-2.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-white font-mono text-xs font-bold flex items-center gap-2"
               >
-                <span>REVIEW DOSSIER</span>
+                <span>REVIEW PREVIEW</span>
                 <ArrowRight className="w-4 h-4" />
               </button>
             </div>
           </div>
         )}
 
-        {/* STEP 7: Review Identity Card Preview */}
+        {/* STEP 7 */}
         {step === 7 && (
           <div className="bg-slate-950/90 border border-slate-800/90 rounded-3xl p-8 shadow-2xl">
             <h2 className="font-chakra text-2xl font-bold text-white mb-1">
-              Identity Verification Preview
+              Demo Preview Dossier
             </h2>
             <p className="text-xs font-mono text-slate-400 mb-6">
-              Review your official lunar citizen credentials before transmitting them to Selenia Prime registry.
+              This launches a temporary in-memory <code className="text-amber-300">SIM-9XXXX</code> astronaut in the 3D colony.
             </p>
 
-            {/* Holographic ID Card Preview */}
-            <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border-2 border-cyan-500/50 rounded-2xl p-6 shadow-2xl max-w-lg mx-auto relative overflow-hidden">
-              <div className="absolute top-0 right-0 w-32 h-32 bg-cyan-500/10 rounded-full blur-2xl pointer-events-none" />
+            {submitError && (
+              <div className="mb-4 p-3 rounded-xl bg-rose-950/50 border border-rose-800/70 text-xs font-mono text-rose-200">
+                {submitError}
+              </div>
+            )}
 
+            <div className="bg-gradient-to-br from-slate-900 via-slate-950 to-slate-900 border-2 border-amber-500/40 rounded-2xl p-6 shadow-2xl max-w-lg mx-auto">
               <div className="flex items-start justify-between border-b border-slate-800 pb-4 mb-4">
                 <div>
-                  <div className="text-[10px] font-mono tracking-widest text-cyan-400 uppercase font-bold">
-                    SELENIA PRIME CITIZEN ID
+                  <div className="text-[10px] font-mono tracking-widest text-amber-300 uppercase font-bold">
+                    DEMO PREVIEW SIMULATION CARD
                   </div>
-                  <div className="font-chakra text-xl font-bold text-white mt-0.5">
-                    {displayName}
-                  </div>
+                  <div className="font-chakra text-xl font-bold text-white mt-0.5">{displayName}</div>
                   <div className="text-xs font-mono text-slate-400">@{usernameClean}</div>
                 </div>
 
@@ -616,20 +647,17 @@ export const JoinPage: React.FC = () => {
                     {chosenDeptInfo.name}
                   </div>
                 </div>
-
                 <div>
                   <div className="text-[10px] text-slate-500 uppercase">Assigned District</div>
                   <div className="text-white font-bold">{chosenDeptInfo.primaryDistrictId}</div>
                 </div>
-
                 <div>
                   <div className="text-[10px] text-slate-500 uppercase">Specialization</div>
                   <div className="text-slate-200">{profession}</div>
                 </div>
-
                 <div>
-                  <div className="text-[10px] text-slate-500 uppercase">Starting Balance</div>
-                  <div className="text-amber-300 font-bold">100 CC</div>
+                  <div className="text-[10px] text-slate-500 uppercase">Mode</div>
+                  <div className="text-amber-300 font-bold">IN-MEMORY DEMO</div>
                 </div>
               </div>
 
@@ -647,101 +675,79 @@ export const JoinPage: React.FC = () => {
               </button>
               <button
                 disabled={isSubmitting}
-                onClick={handleRegister}
-                className="px-8 py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-chakra text-sm font-bold flex items-center gap-2 shadow-lg shadow-cyan-950/50"
+                onClick={handleDemoPreviewRegister}
+                className="px-8 py-3 rounded-xl bg-gradient-to-r from-amber-600 to-cyan-600 hover:from-amber-500 hover:to-cyan-500 text-white font-chakra text-sm font-bold flex items-center gap-2 shadow-lg"
               >
                 <Rocket className="w-4 h-4" />
-                <span>CONFIRM & TRANSMIT CITIZENSHIP</span>
+                <span>LAUNCH DEMO PREVIEW</span>
               </button>
             </div>
           </div>
         )}
 
-        {/* STEP 8: Arrival Sequence & Completed Dossier */}
+        {/* STEP 8 */}
         {step === 8 && registeredCitizen && (
-          <div className="bg-slate-950/95 border border-cyan-500/60 rounded-3xl p-8 md:p-12 shadow-2xl text-center relative overflow-hidden">
+          <div className="bg-slate-950/95 border border-amber-500/50 rounded-3xl p-8 md:p-12 shadow-2xl text-center relative overflow-hidden">
             {arrivalStage === 'descending' && (
-              <div className="py-12 animate-in fade-in duration-300">
-                <Rocket className="w-16 h-16 text-cyan-400 mx-auto mb-4 animate-bounce" />
+              <div className="py-12">
+                <Rocket className="w-16 h-16 text-amber-400 mx-auto mb-4 animate-bounce" />
                 <h2 className="font-chakra text-2xl md:text-3xl font-extrabold text-white">
-                  TRANSMITTING ORBITAL DESCENT VECTORS...
+                  DEPLOYING DEMO PREVIEW AVATAR...
                 </h2>
                 <p className="text-xs font-mono text-slate-400 mt-2">
-                  Selenia Prime Gateway has cleared shuttle approach to {registeredCitizen.districtId} District.
+                  Placing simulation avatar in {registeredCitizen.districtId} District.
                 </p>
-                <div className="mt-6 flex justify-center gap-1">
-                  <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping" />
-                  <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping delay-100" />
-                  <div className="w-2 h-2 rounded-full bg-cyan-400 animate-ping delay-200" />
-                </div>
               </div>
             )}
 
             {arrivalStage === 'touchdown' && (
-              <div className="py-12 animate-in fade-in duration-300">
-                <Zap className="w-16 h-16 text-amber-400 mx-auto mb-4 animate-pulse" />
+              <div className="py-12">
+                <Zap className="w-16 h-16 text-cyan-400 mx-auto mb-4 animate-pulse" />
                 <h2 className="font-chakra text-2xl md:text-3xl font-extrabold text-white">
-                  TOUCHDOWN CONFIRMED — PRESSURIZING AIRLOCK
+                  SIMULATION TOUCHDOWN CONFIRMED
                 </h2>
                 <p className="text-xs font-mono text-slate-400 mt-2">
-                  Atmospheric telemetry synced. Astronaut Mk.IV suit telemetry online.
+                  Surface telemetry online in local sandbox.
                 </p>
               </div>
             )}
 
             {arrivalStage === 'complete' && (
-              <div className="animate-in fade-in duration-500">
-                <div className="w-16 h-16 rounded-2xl bg-emerald-950/80 border border-emerald-800/80 flex items-center justify-center mx-auto mb-4 text-emerald-400">
-                  <CheckCircle2 className="w-10 h-10" />
+              <div>
+                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-amber-950 text-amber-300 border border-amber-800 text-xs font-mono font-bold mb-3">
+                  DEMO PREVIEW ACTIVE (NON-PERSISTENT)
                 </div>
 
-                <div className="inline-flex items-center gap-1.5 px-3 py-1 rounded-full bg-cyan-950 text-cyan-300 border border-cyan-800 text-xs font-mono font-bold mb-3">
-                  CITIZENSHIP GRANTED
-                </div>
-
-                <h2 className="font-chakra text-3xl md:text-4xl font-extrabold text-white">
-                  Welcome to Selenia Prime, {registeredCitizen.displayName}
+                <h2 className="font-chakra text-3xl font-extrabold text-white">
+                  Preview Ready: {registeredCitizen.displayName}
                 </h2>
 
                 <div className="mt-4 p-4 rounded-2xl bg-slate-900/80 border border-slate-800 max-w-md mx-auto font-mono text-xs text-left space-y-2">
                   <div className="flex justify-between">
-                    <span className="text-slate-400">Permanent Citizen ID:</span>
-                    <span className="text-cyan-400 font-bold text-sm">
-                      {registeredCitizen.citizenId}
-                    </span>
+                    <span className="text-slate-400">Preview ID:</span>
+                    <span className="text-amber-300 font-bold">{registeredCitizen.citizenId}</span>
                   </div>
                   <div className="flex justify-between">
                     <span className="text-slate-400">Assigned District:</span>
-                    <span className="text-white font-bold">
-                      {registeredCitizen.districtId} DISTRICT
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Starting Colony Credits:</span>
-                    <span className="text-amber-300 font-bold">
-                      {registeredCitizen.colonyCredits} CC
-                    </span>
-                  </div>
-                  <div className="flex justify-between">
-                    <span className="text-slate-400">Status:</span>
-                    <span className="text-emerald-400 font-bold">ACTIVE — STATIONED</span>
+                    <span className="text-white font-bold">{registeredCitizen.districtId} DISTRICT</span>
                   </div>
                 </div>
 
                 <div className="mt-8 flex flex-col sm:flex-row items-center justify-center gap-4">
                   <button
-                    onClick={() => navigate(`/citizen/${registeredCitizen.citizenId}`)}
-                    className="w-full sm:w-auto px-6 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-xs font-mono text-slate-300 hover:text-white transition-colors"
+                    onClick={() => navigate(`/world?focus=${registeredCitizen.citizenId}`)}
+                    className="w-full sm:w-auto px-7 py-3 rounded-xl bg-slate-900 hover:bg-slate-800 border border-slate-700 text-white font-chakra text-sm font-bold flex items-center justify-center gap-2"
                   >
-                    VIEW CITIZEN DOSSIER
+                    <Compass className="w-4 h-4 text-cyan-400" />
+                    <span>VIEW IN 3D COLONY</span>
                   </button>
 
                   <button
-                    onClick={() => navigate(`/world?focus=${registeredCitizen.citizenId}`)}
-                    className="w-full sm:w-auto px-8 py-3.5 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-chakra text-sm font-bold flex items-center justify-center gap-2 shadow-xl shadow-cyan-950/60"
+                    onClick={() => navigate('/citizenship')}
+                    className="w-full sm:w-auto px-8 py-3 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white font-chakra text-sm font-bold flex items-center justify-center gap-2"
                   >
-                    <Compass className="w-5 h-5" />
-                    <span>ENTER 3D COLONY WORLD</span>
+                    <ShieldCheck className="w-4 h-4" />
+                    <span>CLAIM REAL CITIZENSHIP</span>
                   </button>
                 </div>
               </div>

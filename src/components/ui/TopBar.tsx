@@ -1,7 +1,9 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { Search, Bell, Settings, Activity, ShieldCheck, Users, Globe2, UserPlus, Compass } from 'lucide-react';
+import { Search, Bell, Settings, Users, Globe2, UserPlus } from 'lucide-react';
 import { useColony } from '../../context/ColonyContext';
+import { useCitizen } from '../../context/CitizenContext';
+import { AccountMenu } from './AccountMenu';
 
 export const TopBar: React.FC = () => {
   const navigate = useNavigate();
@@ -10,11 +12,12 @@ export const TopBar: React.FC = () => {
     setIsNotificationsOpen,
     setIsSettingsOpen,
     resetCamera,
-    citizens
+    citizens,
   } = useColony();
+  const { isApiOnline, liveCount, showDemoCrew } = useCitizen();
 
   return (
-    <header className="fixed top-0 left-0 right-0 z-20 pointer-events-none px-6 py-4 flex items-start justify-between">
+    <header className="fixed top-0 left-0 right-0 z-20 pointer-events-none px-4 sm:px-6 py-4 flex items-start justify-between gap-3">
       {/* Top Left: LUNAR Brand & Civilization Status */}
       <div className="pointer-events-auto flex items-center gap-4 bg-slate-950/80 backdrop-blur-md border border-slate-800/80 rounded-xl px-4 py-2.5 shadow-2xl">
         <button
@@ -34,22 +37,38 @@ export const TopBar: React.FC = () => {
               <span className="font-chakra tracking-[0.25em] text-lg font-bold text-white group-hover:text-cyan-400 transition-colors">
                 LUNAR
               </span>
-              <span className="text-[10px] font-mono tracking-wider px-1.5 py-0.5 rounded bg-cyan-950/80 text-cyan-400 border border-cyan-800/60 font-semibold">
-                PHASE 2: CITIZENS
-              </span>
+              {isApiOnline ? (
+                <span
+                  className="text-[10px] font-mono tracking-wider px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-semibold"
+                  title={
+                    showDemoCrew
+                      ? `${liveCount} verified citizens + simulation showcase crew`
+                      : `${liveCount} verified PostgreSQL citizens`
+                  }
+                >
+                  LIVE COLONY
+                </span>
+              ) : (
+                <span
+                  className="text-[10px] font-mono tracking-wider px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 font-semibold"
+                  title="Backend registry offline — viewing local simulation showcase"
+                >
+                  DEMO SANDBOX
+                </span>
+              )}
             </div>
             <div className="flex items-center gap-1.5 text-[11px] font-mono text-emerald-400 font-medium">
               <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping inline-block" />
               <span>CIVILIZATION ONLINE</span>
-              <span className="text-slate-500">•</span>
-              <span className="text-slate-400">99.4% HAB INTEGRITY</span>
+              <span className="text-slate-500 hidden sm:inline">•</span>
+              <span className="text-slate-400 hidden sm:inline">99.4% HAB INTEGRITY</span>
             </div>
           </div>
         </button>
       </div>
 
       {/* Top Center: Colony Statistics + Navigation Pills */}
-      <div className="pointer-events-auto hidden md:flex items-center gap-4 bg-slate-950/80 backdrop-blur-md border border-slate-800/80 rounded-xl px-5 py-2 shadow-2xl">
+      <div className="pointer-events-auto hidden lg:flex items-center gap-4 bg-slate-950/80 backdrop-blur-md border border-slate-800/80 rounded-xl px-5 py-2 shadow-2xl">
         {/* Colony Settlement */}
         <div className="flex items-center gap-2.5">
           <Globe2 className="w-4 h-4 text-cyan-400" />
@@ -84,28 +103,28 @@ export const TopBar: React.FC = () => {
           <span>DIRECTORY</span>
         </button>
 
-        {/* Direct Nav: Enlist */}
+        {/* Direct Nav: Citizenship Terminal */}
         <button
-          onClick={() => navigate('/join')}
+          onClick={() => navigate('/citizenship')}
           className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-cyan-950/80 hover:bg-cyan-900 border border-cyan-700/60 text-xs font-mono font-bold text-cyan-300 hover:text-white transition-colors"
-          title="Join Lunar Citizenship"
+          title="Open Lunar Citizenship Terminal"
         >
           <UserPlus className="w-3.5 h-3.5 text-cyan-400" />
           <span>JOIN COLONY</span>
         </button>
       </div>
 
-      {/* Top Right: Search Citizens, Notifications, Settings */}
+      {/* Top Right: Search, Notifications, Settings & Account Menu */}
       <div className="pointer-events-auto flex items-center gap-2 bg-slate-950/80 backdrop-blur-md border border-slate-800/80 rounded-xl p-1.5 shadow-2xl">
         {/* Search Citizen Button */}
         <button
           onClick={() => setIsSearchOpen(true)}
-          className="flex items-center gap-2.5 px-3 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700/60 text-slate-200 hover:text-white transition-all text-xs font-mono font-medium group"
+          className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-slate-900/90 hover:bg-slate-800 border border-slate-700/60 text-slate-200 hover:text-white transition-all text-xs font-mono font-medium group"
           title="Search Citizens (Cmd+K)"
         >
           <Search className="w-3.5 h-3.5 text-cyan-400 group-hover:scale-110 transition-transform" />
-          <span className="hidden sm:inline">FIND CITIZEN</span>
-          <kbd className="hidden lg:inline-block px-1.5 py-0.5 text-[9px] bg-slate-800 rounded border border-slate-700 text-slate-400 font-mono">
+          <span className="hidden xl:inline">FIND CITIZEN</span>
+          <kbd className="hidden 2xl:inline-block px-1.5 py-0.5 text-[9px] bg-slate-800 rounded border border-slate-700 text-slate-400 font-mono">
             ⌘K
           </kbd>
         </button>
@@ -128,6 +147,11 @@ export const TopBar: React.FC = () => {
         >
           <Settings className="w-4 h-4" />
         </button>
+
+        <div className="w-px h-5 bg-slate-800" />
+
+        {/* Phase 3 Account Menu */}
+        <AccountMenu citizenshipPath="/citizenship" />
       </div>
     </header>
   );

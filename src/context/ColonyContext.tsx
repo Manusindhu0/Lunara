@@ -1,8 +1,8 @@
-import React, { createContext, useContext, useState, useCallback, useMemo, useEffect } from 'react';
+import React, { createContext, useContext, useState, useCallback, useMemo } from 'react';
 import { BuildingData, CitizenData, Citizen, DistrictId, CameraViewPreset, ColonyState } from '../types';
 import { DISTRICTS } from '../data/districts';
 import { BUILDINGS } from '../data/buildings';
-import { citizenService } from '../lib/citizenService';
+import { useCitizen } from './CitizenContext';
 import { toCitizenDataArray, citizenToCitizenData } from '../lib/citizenAdapter';
 
 interface ColonyContextType extends ColonyState {
@@ -27,7 +27,7 @@ interface ColonyContextType extends ColonyState {
   focusCitizen: (citizen: CitizenData | Citizen) => void;
   zoomIn: () => void;
   zoomOut: () => void;
-  refreshCitizens: () => void;
+  refreshCitizens: () => Promise<Citizen[]>;
   
   // Data access
   buildings: BuildingData[];
@@ -41,6 +41,8 @@ const DEFAULT_LOOK_AT: [number, number, number] = [0, 0, 0];
 const ColonyContext = createContext<ColonyContextType | null>(null);
 
 export const ColonyProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const { citizens: domainCitizens, refreshCitizens } = useCitizen();
+
   const [selectedBuilding, setSelectedBuildingState] = useState<BuildingData | null>(null);
   const [selectedCitizen, setSelectedCitizenState] = useState<CitizenData | null>(null);
   const [selectedDistrict, setSelectedDistrictState] = useState<DistrictId | null>(null);
@@ -59,22 +61,11 @@ export const ColonyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
   const [targetCameraPosition, setTargetCameraPosition] = useState<[number, number, number]>(DEFAULT_CAMERA_POS);
   const [targetLookAt, setTargetLookAt] = useState<[number, number, number]>(DEFAULT_LOOK_AT);
 
-  const [citizens, setCitizens] = useState<CitizenData[]>(() => {
-    return toCitizenDataArray(citizenService.getAll());
-  });
-
-  const refreshCitizens = useCallback(() => {
-    setCitizens(toCitizenDataArray(citizenService.getAll()));
-  }, []);
-
-  useEffect(() => {
-    const unsubscribe = citizenService.subscribe(() => {
-      refreshCitizens();
-    });
-    return () => {
-      unsubscribe();
-    };
-  }, [refreshCitizens]);
+  // Reactive 3D citizens derived directly from CitizenContext
+  const citizens = useMemo<CitizenData[]>(
+    () => toCitizenDataArray(domainCitizens),
+    [domainCitizens]
+  );
 
   const resetCamera = useCallback(() => {
     setSelectedBuildingState(null);
@@ -94,7 +85,6 @@ export const ColonyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     const dist = DISTRICTS[districtId];
     if (dist) {
       const [cx, cy, cz] = dist.center;
-      // Position camera offset to view district beautifully
       const distOffset = districtId === 'NEXUS' ? 75 : 65;
       const angle = Math.atan2(cz, cx) || Math.PI / 4;
       const camX = cx + Math.cos(angle) * distOffset;
@@ -111,7 +101,6 @@ export const ColonyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCameraPreset('inspection');
 
     const [bx, by, bz] = building.position;
-    // Position camera close to building for inspection
     const inspectDistance = 26;
     setTargetCameraPosition([bx + inspectDistance * 0.7, by + 16, bz + inspectDistance * 0.7]);
     setTargetLookAt([bx, by + 4, bz]);
@@ -125,7 +114,6 @@ export const ColonyProvider: React.FC<{ children: React.ReactNode }> = ({ childr
     setCameraPreset('inspection');
 
     const [cx, cy, cz] = data.position;
-    // Astronaut inspection close-up
     setTargetCameraPosition([cx + 6, cy + 5, cz + 6]);
     setTargetLookAt([cx, cy + 1.2, cz]);
   }, []);

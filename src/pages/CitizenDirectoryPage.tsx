@@ -2,32 +2,44 @@ import React, { useState, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Search,
-  Filter,
   UserPlus,
   Compass,
   ArrowRight,
   Shield,
-  Award,
+  ShieldCheck,
   Sparkles,
   MapPin,
-  ExternalLink,
-  ChevronDown,
   Activity,
   Coins,
   Check,
-  Copy
+  Copy,
+  Award,
+  FlaskConical,
+  WifiOff,
 } from 'lucide-react';
 import { useCitizen } from '../context/CitizenContext';
+import { AccountMenu } from '../components/ui/AccountMenu';
 import { DEPARTMENTS } from '../data/departments';
 import { DISTRICTS } from '../data/districts';
-import { DepartmentId, DistrictId, CareerRank, CitizenStatus, Citizen } from '../types';
+import { DepartmentId, DistrictId, CareerRank, CitizenStatus } from '../types';
+
+type SourceFilter = 'ALL' | 'LIVE' | 'DEMO';
 
 export const CitizenDirectoryPage: React.FC = () => {
   const navigate = useNavigate();
-  const { citizens, totalCount } = useCitizen();
+  const {
+    citizens,
+    totalCount,
+    liveCount,
+    isLoading,
+    isApiOnline,
+    showDemoCrew,
+    setShowDemoCrew,
+  } = useCitizen();
 
   // Search & Filter State
   const [query, setQuery] = useState('');
+  const [sourceFilter, setSourceFilter] = useState<SourceFilter>('ALL');
   const [selectedDept, setSelectedDept] = useState<DepartmentId | 'ALL'>('ALL');
   const [selectedDistrict, setSelectedDistrict] = useState<DistrictId | 'ALL'>('ALL');
   const [selectedRank, setSelectedRank] = useState<CareerRank | 'ALL'>('ALL');
@@ -35,7 +47,6 @@ export const CitizenDirectoryPage: React.FC = () => {
   const [sortBy, setSortBy] = useState<'level' | 'newest' | 'contribution' | 'name' | 'id'>('level');
   const [copiedId, setCopiedId] = useState<string | null>(null);
 
-  // Copy ID feedback
   const handleCopyId = (e: React.MouseEvent, id: string) => {
     e.stopPropagation();
     navigator.clipboard.writeText(id);
@@ -43,10 +54,11 @@ export const CitizenDirectoryPage: React.FC = () => {
     setTimeout(() => setCopiedId(null), 2000);
   };
 
-  // Filtered & Sorted Citizens
   const filteredCitizens = useMemo(() => {
-    let result = citizens.filter((c) => {
-      // Search query
+    const result = citizens.filter((c) => {
+      if (sourceFilter === 'LIVE' && c.isDemo) return false;
+      if (sourceFilter === 'DEMO' && !c.isDemo) return false;
+
       if (query.trim()) {
         const q = query.toLowerCase().trim();
         const matchesQuery =
@@ -60,23 +72,19 @@ export const CitizenDirectoryPage: React.FC = () => {
         if (!matchesQuery) return false;
       }
 
-      // Department filter
       if (selectedDept !== 'ALL' && c.department !== selectedDept) return false;
-
-      // District filter
       if (selectedDistrict !== 'ALL' && c.districtId !== selectedDistrict) return false;
-
-      // Rank filter
       if (selectedRank !== 'ALL' && c.rank !== selectedRank) return false;
-
-      // Status filter
       if (selectedStatus !== 'ALL' && c.status !== selectedStatus) return false;
 
       return true;
     });
 
-    // Sort
     result.sort((a, b) => {
+      // Prioritize real verified citizens first when sorting by newest/level unless identical
+      if (a.isDemo !== b.isDemo && sortBy === 'newest') {
+        return a.isDemo ? 1 : -1;
+      }
       switch (sortBy) {
         case 'level':
           return b.level - a.level || b.xp - a.xp;
@@ -94,15 +102,24 @@ export const CitizenDirectoryPage: React.FC = () => {
     });
 
     return result;
-  }, [citizens, query, selectedDept, selectedDistrict, selectedRank, selectedStatus, sortBy]);
+  }, [
+    citizens,
+    sourceFilter,
+    query,
+    selectedDept,
+    selectedDistrict,
+    selectedRank,
+    selectedStatus,
+    sortBy,
+  ]);
 
-  // Aggregate stats
   const activeCount = citizens.filter((c) => c.status === 'ACTIVE' || c.status === 'ON DUTY').length;
   const foundingCount = citizens.filter((c) => c.isFoundingCitizen).length;
   const totalXp = citizens.reduce((sum, c) => sum + c.xp, 0);
 
   const resetFilters = () => {
     setQuery('');
+    setSourceFilter('ALL');
     setSelectedDept('ALL');
     setSelectedDistrict('ALL');
     setSelectedRank('ALL');
@@ -111,9 +128,9 @@ export const CitizenDirectoryPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#05070a] text-slate-100 flex flex-col font-sans">
+    <div className="h-screen overflow-y-auto bg-[#05070a] text-slate-100 flex flex-col font-sans select-text">
       {/* Top Navbar */}
-      <header className="sticky top-0 z-30 bg-slate-950/80 backdrop-blur-xl border-b border-slate-800/80 px-6 py-4 flex items-center justify-between">
+      <header className="sticky top-0 z-30 bg-slate-950/85 backdrop-blur-xl border-b border-slate-800/80 px-6 py-4 flex items-center justify-between gap-4">
         <div className="flex items-center gap-4">
           <button
             onClick={() => navigate('/world')}
@@ -134,7 +151,7 @@ export const CitizenDirectoryPage: React.FC = () => {
                   DIRECTORY
                 </span>
               </div>
-              <div className="text-[11px] font-mono text-slate-400">
+              <div className="text-[11px] font-mono text-slate-400 hidden sm:block">
                 Selenia Prime Citizen Registry
               </div>
             </div>
@@ -142,22 +159,25 @@ export const CitizenDirectoryPage: React.FC = () => {
         </div>
 
         {/* Action Controls */}
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <button
             onClick={() => navigate('/world')}
             className="flex items-center gap-2 px-3.5 py-2 rounded-xl bg-slate-900/90 hover:bg-slate-800 border border-slate-700 text-xs font-mono font-medium text-slate-200 hover:text-white transition-all shadow-sm"
           >
             <Compass className="w-4 h-4 text-cyan-400" />
-            <span>3D COLONY WORLD</span>
+            <span className="hidden sm:inline">3D COLONY WORLD</span>
           </button>
 
           <button
-            onClick={() => navigate('/join')}
+            onClick={() => navigate('/citizenship')}
             className="flex items-center gap-2 px-4 py-2 rounded-xl bg-gradient-to-r from-cyan-600 to-blue-600 hover:from-cyan-500 hover:to-blue-500 text-white text-xs font-mono font-bold transition-all shadow-lg shadow-cyan-950/40 border border-cyan-400/30"
           >
             <UserPlus className="w-4 h-4" />
-            <span>ENLIST CITIZEN</span>
+            <span className="hidden md:inline">CITIZENSHIP TERMINAL</span>
+            <span className="md:hidden">APPLY</span>
           </button>
+
+          <AccountMenu citizenshipPath="/citizenship" />
         </div>
       </header>
 
@@ -174,19 +194,24 @@ export const CitizenDirectoryPage: React.FC = () => {
                 Colony Citizens & Pioneer Directory
               </h1>
               <p className="text-slate-400 text-sm mt-2 max-w-2xl leading-relaxed">
-                Explore the roster of engineers, bioscience specialists, researchers, commanders, and pioneers
-                stationed on the lunar surface. Every citizen holds an immutable Citizen ID and live world coordinates.
+                Explore verified citizens (<code className="text-emerald-300 font-mono">LUN-XXXXX</code>)
+                alongside the Selenia Prime simulation showcase crew (<code className="text-amber-300 font-mono">SIM-XXXXX</code>).
+                Every citizen holds an immutable Citizen ID and live world coordinates.
               </p>
             </div>
 
             {/* Quick Metrics */}
             <div className="grid grid-cols-2 sm:grid-cols-4 gap-3 font-mono">
               <div className="bg-slate-900/80 border border-slate-800 rounded-xl p-3">
-                <div className="text-[10px] text-slate-400 uppercase tracking-wider">Registered</div>
-                <div className="text-xl font-bold text-white mt-0.5">{totalCount}</div>
-                <div className="text-[10px] text-emerald-400 mt-0.5 flex items-center gap-1">
-                  <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 inline-block" />
-                  100% Synced
+                <div className="text-[10px] text-slate-400 uppercase tracking-wider">Verified Live</div>
+                <div className="text-xl font-bold text-emerald-400 mt-0.5">{liveCount}</div>
+                <div className="text-[10px] text-slate-400 mt-0.5 flex items-center gap-1">
+                  <span
+                    className={`w-1.5 h-1.5 rounded-full inline-block ${
+                      isApiOnline ? 'bg-emerald-400' : 'bg-amber-400'
+                    }`}
+                  />
+                  {isApiOnline ? 'PostgreSQL Synced' : 'Offline Mode'}
                 </div>
               </div>
 
@@ -209,12 +234,40 @@ export const CitizenDirectoryPage: React.FC = () => {
               </div>
             </div>
           </div>
+
+          {/* API Offline / Empty Live Registry Status Notice */}
+          {!isApiOnline && (
+            <div className="mt-5 p-3.5 rounded-xl bg-amber-950/40 border border-amber-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono text-amber-200">
+              <div className="flex items-center gap-2.5">
+                <WifiOff className="w-4 h-4 text-amber-400 shrink-0" />
+                <span>
+                  Backend citizen API is currently unreachable. Displaying local Simulation Showcase crew (<code className="text-amber-300">SIM-*</code>) in Demo Mode.
+                </span>
+              </div>
+            </div>
+          )}
+
+          {isApiOnline && !isLoading && liveCount === 0 && (
+            <div className="mt-5 p-3.5 rounded-xl bg-cyan-950/40 border border-cyan-800/60 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs font-mono text-cyan-200">
+              <div className="flex items-center gap-2.5">
+                <ShieldCheck className="w-4 h-4 text-cyan-400 shrink-0" />
+                <span>
+                  No verified PostgreSQL citizens (<code className="text-cyan-300">LUN-00001</code>) have enlisted yet. Simulation showcase crew is displayed below.
+                </span>
+              </div>
+              <button
+                onClick={() => navigate('/citizenship')}
+                className="shrink-0 px-3 py-1.5 rounded-lg bg-cyan-600 hover:bg-cyan-500 text-white font-bold transition-colors"
+              >
+                CLAIM LUN-00001
+              </button>
+            </div>
+          )}
         </div>
       </section>
 
       {/* Filters and Controls */}
-      <section className="px-6 py-6 max-w-7xl mx-auto w-full">
-        {/* Search Input & Primary Filters */}
+      <section className="px-6 py-6 max-w-7xl mx-auto w-full pb-12">
         <div className="bg-slate-950/90 border border-slate-800/90 rounded-2xl p-4 shadow-xl mb-6">
           <div className="flex flex-col lg:flex-row gap-4 items-stretch lg:items-center justify-between">
             {/* Search bar */}
@@ -224,7 +277,7 @@ export const CitizenDirectoryPage: React.FC = () => {
                 type="text"
                 value={query}
                 onChange={(e) => setQuery(e.target.value)}
-                placeholder="Search by Citizen ID (e.g. LUN-00001), username (@elena), name, profession, or activity..."
+                placeholder="Search by Citizen ID (LUN-00001 / SIM-00001), @username, name, or profession..."
                 className="w-full pl-10 pr-4 py-2.5 bg-slate-900/90 border border-slate-700/80 rounded-xl text-sm font-mono text-slate-100 placeholder-slate-500 focus:outline-none focus:border-cyan-500/80 transition-colors"
               />
               {query && (
@@ -239,10 +292,21 @@ export const CitizenDirectoryPage: React.FC = () => {
 
             {/* Filter selectors */}
             <div className="flex flex-wrap items-center gap-2.5 font-mono text-xs">
+              {/* Source Filter */}
+              <select
+                value={sourceFilter}
+                onChange={(e) => setSourceFilter(e.target.value as SourceFilter)}
+                className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-cyan-500"
+              >
+                <option value="ALL">All Sources ({totalCount})</option>
+                <option value="LIVE">Verified Citizens ({liveCount})</option>
+                <option value="DEMO">Demo Showcase</option>
+              </select>
+
               {/* Department */}
               <select
                 value={selectedDept}
-                onChange={(e) => setSelectedDept(e.target.value as any)}
+                onChange={(e) => setSelectedDept(e.target.value as DepartmentId | 'ALL')}
                 className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-cyan-500"
               >
                 <option value="ALL">All Departments</option>
@@ -256,7 +320,7 @@ export const CitizenDirectoryPage: React.FC = () => {
               {/* District */}
               <select
                 value={selectedDistrict}
-                onChange={(e) => setSelectedDistrict(e.target.value as any)}
+                onChange={(e) => setSelectedDistrict(e.target.value as DistrictId | 'ALL')}
                 className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-cyan-500"
               >
                 <option value="ALL">All Districts</option>
@@ -270,7 +334,7 @@ export const CitizenDirectoryPage: React.FC = () => {
               {/* Rank */}
               <select
                 value={selectedRank}
-                onChange={(e) => setSelectedRank(e.target.value as any)}
+                onChange={(e) => setSelectedRank(e.target.value as CareerRank | 'ALL')}
                 className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-slate-200 focus:outline-none focus:border-cyan-500"
               >
                 <option value="ALL">All Ranks</option>
@@ -285,7 +349,7 @@ export const CitizenDirectoryPage: React.FC = () => {
               {/* Sort By */}
               <select
                 value={sortBy}
-                onChange={(e) => setSortBy(e.target.value as any)}
+                onChange={(e) => setSortBy(e.target.value as typeof sortBy)}
                 className="bg-slate-900 border border-slate-700 rounded-xl px-3 py-2 text-cyan-300 font-semibold focus:outline-none focus:border-cyan-500"
               >
                 <option value="level">Sort: Highest Level / XP</option>
@@ -295,7 +359,28 @@ export const CitizenDirectoryPage: React.FC = () => {
                 <option value="id">Sort: Citizen ID</option>
               </select>
 
-              {(query || selectedDept !== 'ALL' || selectedDistrict !== 'ALL' || selectedRank !== 'ALL') && (
+              {/* Demo Crew Toggle (when API is online) */}
+              {isApiOnline && (
+                <button
+                  type="button"
+                  onClick={() => setShowDemoCrew(!showDemoCrew)}
+                  className={`px-3 py-2 rounded-xl border text-xs font-mono transition-colors flex items-center gap-1.5 ${
+                    showDemoCrew
+                      ? 'bg-amber-950/60 border-amber-700/70 text-amber-300'
+                      : 'bg-slate-900 border-slate-700 text-slate-400 hover:text-white'
+                  }`}
+                  title="Toggle Phase 2 Simulation Showcase Crew in 3D World & Directory"
+                >
+                  <FlaskConical className="w-3.5 h-3.5" />
+                  <span>{showDemoCrew ? 'Demo Crew: ON' : 'Demo Crew: OFF'}</span>
+                </button>
+              )}
+
+              {(query ||
+                sourceFilter !== 'ALL' ||
+                selectedDept !== 'ALL' ||
+                selectedDistrict !== 'ALL' ||
+                selectedRank !== 'ALL') && (
                 <button
                   onClick={resetFilters}
                   className="px-3 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white transition-colors"
@@ -314,7 +399,7 @@ export const CitizenDirectoryPage: React.FC = () => {
           </div>
           <div className="flex items-center gap-2">
             <span className="w-2 h-2 rounded-full bg-emerald-400 inline-block animate-ping" />
-            <span>LIVE 3D SURFACE PRESENCE ACTIVE</span>
+            <span>{isLoading ? 'SYNCING REGISTRY...' : 'LIVE 3D SURFACE PRESENCE ACTIVE'}</span>
           </div>
         </div>
 
@@ -324,7 +409,7 @@ export const CitizenDirectoryPage: React.FC = () => {
             <Shield className="w-12 h-12 text-slate-600 mx-auto mb-3" />
             <h3 className="font-chakra text-lg font-bold text-slate-300">No Citizens Found</h3>
             <p className="text-xs font-mono text-slate-500 mt-1 max-w-sm mx-auto">
-              No registered lunar personnel match your current filter parameters.
+              No lunar personnel match your current filter parameters.
             </p>
             <button
               onClick={resetFilters}
@@ -339,6 +424,7 @@ export const CitizenDirectoryPage: React.FC = () => {
               const district = DISTRICTS[citizen.districtId];
               const department = DEPARTMENTS[citizen.department];
               const isCopied = copiedId === citizen.citizenId;
+              const isDemo = Boolean(citizen.isDemo);
 
               return (
                 <div
@@ -353,10 +439,9 @@ export const CitizenDirectoryPage: React.FC = () => {
                   />
 
                   <div>
-                    {/* Header: Avatar, Citizen ID, Founding Badge */}
-                    <div className="flex items-start justify-between gap-3">
-                      <div className="flex items-center gap-3">
-                        {/* Astronaut Portrait Suit */}
+                    {/* Header: Avatar, Citizen ID, Source & Founding Badges */}
+                    <div className="flex items-start justify-between gap-2">
+                      <div className="flex items-center gap-3 min-w-0">
                         <div className="w-12 h-12 rounded-xl bg-slate-900 border border-slate-700 flex items-center justify-center shrink-0 relative overflow-hidden shadow-inner">
                           <div
                             className="w-8 h-8 rounded-full border-2 border-slate-400 relative flex items-center justify-center"
@@ -369,7 +454,7 @@ export const CitizenDirectoryPage: React.FC = () => {
                           )}
                         </div>
 
-                        <div>
+                        <div className="min-w-0">
                           <div className="flex items-center gap-1.5 flex-wrap">
                             <button
                               onClick={(e) => handleCopyId(e, citizen.citizenId)}
@@ -383,27 +468,40 @@ export const CitizenDirectoryPage: React.FC = () => {
                                 <Copy className="w-2.5 h-2.5 text-cyan-400 opacity-60 group-hover:opacity-100" />
                               )}
                             </button>
-                            <span className="text-xs font-mono text-slate-400">
+                            <span className="text-xs font-mono text-slate-400 truncate">
                               @{citizen.username}
                             </span>
                           </div>
 
-                          <h3 className="font-chakra text-base font-bold text-white group-hover:text-cyan-300 transition-colors mt-0.5">
+                          <h3 className="font-chakra text-base font-bold text-white group-hover:text-cyan-300 transition-colors mt-0.5 truncate">
                             {citizen.displayName}
                           </h3>
                         </div>
                       </div>
 
-                      {/* Founding badge */}
-                      {citizen.isFoundingCitizen && (
-                        <span
-                          className="shrink-0 text-[10px] font-mono px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-800/80 font-bold flex items-center gap-1 shadow-sm"
-                          title="Sol 001 Founding Cohort"
-                        >
-                          <Award className="w-3 h-3 text-amber-400" />
-                          FOUNDING
-                        </span>
-                      )}
+                      {/* Badges */}
+                      <div className="flex flex-col items-end gap-1 shrink-0">
+                        {isDemo ? (
+                          <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-amber-950/70 text-amber-300 border border-amber-800/70 font-bold">
+                            DEMO SHOWCASE
+                          </span>
+                        ) : (
+                          <span className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-emerald-950/80 text-emerald-300 border border-emerald-800/80 font-bold flex items-center gap-1">
+                            <ShieldCheck className="w-2.5 h-2.5 text-emerald-400" />
+                            VERIFIED CITIZEN
+                          </span>
+                        )}
+
+                        {citizen.isFoundingCitizen && (
+                          <span
+                            className="text-[9px] font-mono px-2 py-0.5 rounded-full bg-amber-950/80 text-amber-300 border border-amber-800/80 font-bold flex items-center gap-1 shadow-sm"
+                            title="Sol 001 Founding Cohort"
+                          >
+                            <Award className="w-2.5 h-2.5 text-amber-400" />
+                            FOUNDING
+                          </span>
+                        )}
+                      </div>
                     </div>
 
                     {/* Department, District & Rank */}
@@ -454,7 +552,7 @@ export const CitizenDirectoryPage: React.FC = () => {
                     </div>
                   </div>
 
-                  {/* Card Footer: Level, XP, Credits & Locate Button */}
+                  {/* Card Footer */}
                   <div className="mt-4 pt-3 border-t border-slate-800/80 flex items-center justify-between text-xs font-mono">
                     <div className="flex items-center gap-3">
                       <div className="flex items-center gap-1.5">

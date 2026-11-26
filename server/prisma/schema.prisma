@@ -1,0 +1,207 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+enum UserRole {
+  USER
+  ADMIN
+}
+
+enum VerificationStatus {
+  NOT_STARTED
+  PENDING
+  VERIFIED
+  FAILED
+  UNAVAILABLE
+  EXPIRED
+  MANUAL_REVIEW
+}
+
+model User {
+  id            String   @id @default(uuid())
+  email         String   @unique
+  passwordHash  String
+  emailVerified Boolean  @default(false)
+  role          UserRole @default(USER)
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
+
+  sessions                 Session[]
+  emailVerificationTokens  EmailVerificationToken[]
+  passwordResetTokens      PasswordResetToken[]
+  citizen                  Citizen?
+  instagramConnection      InstagramConnection?
+  instagramOAuthStates     InstagramOAuthState[]
+  eligibilityVerifications EligibilityVerification[]
+}
+
+model Session {
+  id             String    @id @default(uuid())
+  userId         String
+  user           User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash      String    @unique
+  expiresAt      DateTime
+  revokedAt      DateTime?
+  userAgent      String?
+  ipAddress      String?
+  createdAt      DateTime  @default(now())
+  lastActivityAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model EmailVerificationToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model PasswordResetToken {
+  id        String    @id @default(uuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model Department {
+  id          String    @id @default(uuid())
+  name        String
+  slug        String    @unique
+  description String
+  districtId  String
+  accentColor String
+  professions String[]
+  citizens    Citizen[]
+}
+
+model CitizenSequence {
+  id        Int @id @default(1)
+  lastValue Int @default(0)
+}
+
+model Citizen {
+  id                    String   @id @default(uuid())
+  citizenId             String   @unique
+  userId                String   @unique
+  user                  User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  username              String   @unique
+  displayName           String
+  avatarUrl             String?
+  astronautType         String
+  suitColor             String
+  bio                   String
+  departmentId          String
+  department            Department @relation(fields: [departmentId], references: [id])
+  profession            String
+  careerRank            String   @default("Citizen")
+  districtId            String
+  buildingId            String
+  positionX             Float
+  positionY             Float
+  positionZ             Float
+  rotationY             Float    @default(0)
+  currentActivity       String
+  status                String   @default("ACTIVE")
+  joinedAt              DateTime @default(now())
+  xp                    Int      @default(0)
+  level                 Int      @default(1)
+  colonyCredits         Int      @default(100)
+  isFoundingCitizen     Boolean  @default(false)
+  missionsCompleted     Int      @default(0)
+  structuresContributed Int      @default(0)
+  totalContribution     Int      @default(0)
+  evaSessions           Int      @default(0)
+  discoveryCount        Int      @default(0)
+  createdAt             DateTime @default(now())
+  updatedAt             DateTime @updatedAt
+
+  achievements CitizenAchievement[]
+
+  @@index([departmentId])
+  @@index([districtId])
+  @@index([status])
+}
+
+model Achievement {
+  id          String               @id @default(uuid())
+  slug        String               @unique
+  name        String
+  description String
+  icon        String
+  rarity      String
+  citizens    CitizenAchievement[]
+}
+
+model CitizenAchievement {
+  id            String      @id @default(uuid())
+  citizenId     String
+  citizen       Citizen     @relation(fields: [citizenId], references: [id], onDelete: Cascade)
+  achievementId String
+  achievement   Achievement @relation(fields: [achievementId], references: [id], onDelete: Cascade)
+  unlockedAt    DateTime    @default(now())
+
+  @@unique([citizenId, achievementId])
+  @@index([citizenId])
+}
+
+model InstagramConnection {
+  id                   String    @id @default(uuid())
+  userId               String    @unique
+  user                 User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider             String    @default("instagram")
+  providerUserId       String
+  username             String
+  profilePictureUrl    String?
+  accessTokenEncrypted String?
+  tokenExpiresAt       DateTime?
+  connectedAt          DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  @@unique([provider, providerUserId])
+}
+
+model InstagramOAuthState {
+  id        String    @id @default(uuid())
+  stateHash String    @unique
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+}
+
+model EligibilityVerification {
+  id               String             @id @default(uuid())
+  userId           String
+  user             User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  provider         String
+  verificationType String
+  status           VerificationStatus @default(NOT_STARTED)
+  result           Json?
+  reason           String?
+  verifiedAt       DateTime?
+  expiresAt        DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  @@index([userId])
+  @@index([userId, provider, verificationType])
+}

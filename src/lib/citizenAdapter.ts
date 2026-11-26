@@ -25,6 +25,7 @@ export function citizenToCitizenData(c: Citizen): CitizenData {
     joinDate: c.joinedAt,
     biography: c.bio,
     badges: c.achievements.map((a) => a.name),
+    isDemo: Boolean(c.isDemo),
   };
 }
 

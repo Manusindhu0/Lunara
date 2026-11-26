@@ -15,20 +15,22 @@ import {
   Flame
 } from 'lucide-react';
 import { useColony } from '../../context/ColonyContext';
+import { useCitizen } from '../../context/CitizenContext';
 import { DISTRICTS } from '../../data/districts';
 import { DEPARTMENTS } from '../../data/departments';
-import { citizenService } from '../../lib/citizenService';
 
 export const CitizenProfileModal: React.FC = () => {
   const navigate = useNavigate();
   const { selectedCitizen, selectCitizen, focusCitizen } = useColony();
+  const { getCitizenById } = useCitizen();
   const [copiedId, setCopiedId] = useState(false);
 
   if (!selectedCitizen) return null;
 
   const district = DISTRICTS[selectedCitizen.districtId];
-  const fullCitizen = citizenService.getById(selectedCitizen.id);
+  const fullCitizen = getCitizenById(selectedCitizen.id);
   const department = fullCitizen ? DEPARTMENTS[fullCitizen.department] : undefined;
+  const isDemo = Boolean(fullCitizen?.isDemo ?? selectedCitizen.isDemo);
 
   const handleCopyId = (e: React.MouseEvent) => {
     e.stopPropagation();
@@ -75,6 +77,15 @@ export const CitizenProfileModal: React.FC = () => {
               <span className="text-xs font-mono text-slate-400 font-medium">
                 {selectedCitizen.handle}
               </span>
+              {isDemo ? (
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60 font-semibold">
+                  DEMO SHOWCASE
+                </span>
+              ) : (
+                <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-emerald-950/80 text-emerald-300 border border-emerald-800/60 font-semibold">
+                  VERIFIED CITIZEN
+                </span>
+              )}
             </div>
             <h3 className="font-chakra text-lg font-bold text-white mt-0.5">
               {selectedCitizen.name}

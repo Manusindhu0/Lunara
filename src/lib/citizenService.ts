@@ -1,20 +1,28 @@
 // ============================================================
-// LUNAR — Citizen Service
-// Single source of truth for all citizen data.
-// LocalStorage-persisted with clean abstraction layer for
-// eventual backend migration.
+// LUNAR — Phase 3: Citizen Service
+// PostgreSQL-backed API queries via apiClient + in-memory
+// Phase 2 Demo Showcase crew (SIM-00001..SIM-00026).
+// Real citizens are NEVER stored in localStorage.
 // ============================================================
 
-import { Citizen, DepartmentId, DistrictId, CareerRank, CitizenStatus, AstronautType } from '../types';
-import { generateCitizenId, generateInternalId } from './citizenId';
+import {
+  Achievement,
+  AstronautType,
+  CareerRank,
+  Citizen,
+  CitizenStatus,
+  Department,
+  DepartmentId,
+  DistrictId,
+  RegistrationFormData,
+} from '../types';
+import { apiClient, isApiError } from './apiClient';
 import { makeAchievement } from '../data/achievements';
-import { getDistrictForDepartment, assignPlacementSlot } from './citizenPlacement';
-
-const STORAGE_KEY = 'lunar_citizens_v2';
-const SEQUENCE_KEY = 'lunar_citizen_sequence_v2';
+import { DEPARTMENTS } from '../data/departments';
+import { assignPlacementSlot, getDistrictForDepartment } from './citizenPlacement';
 
 // ---- Demo Citizens Seed Data ----
-// 25+ citizens across all 6 districts with realistic variation
+// 26 showcase citizens across all 6 districts (isolated as SIM-* with isDemo: true)
 
 const DEMO_CITIZENS_SEED: Omit<Citizen, '_internalId' | 'citizenId'>[] = [
   // ---- NEXUS / SECURITY ----
@@ -780,192 +788,439 @@ const DEMO_CITIZENS_SEED: Omit<Citizen, '_internalId' | 'citizenId'>[] = [
   },
 ];
 
-// ---- Citizen Store ----
+// ---- Demo Showcase Builder (In-Memory Only, SIM-* Namespace) ----
 
-function loadSequence(): number {
-  try {
-    const raw = localStorage.getItem(SEQUENCE_KEY);
-    return raw ? parseInt(raw, 10) : 0;
-  } catch {
-    return 0;
-  }
-}
-
-function saveSequence(seq: number) {
-  try {
-    localStorage.setItem(SEQUENCE_KEY, String(seq));
-  } catch {}
-}
-
-function loadCitizens(): Citizen[] {
-  try {
-    const raw = localStorage.getItem(STORAGE_KEY);
-    if (!raw) return [];
-    const parsed = JSON.parse(raw);
-    if (!Array.isArray(parsed)) return [];
-    return parsed as Citizen[];
-  } catch {
-    return [];
-  }
-}
-
-function saveCitizens(citizens: Citizen[]) {
-  try {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(citizens));
-  } catch {}
-}
-
-function seedDemoCitizens(existingCitizens: Citizen[], startSeq: number): [Citizen[], number] {
-  const seeded: Citizen[] = [...existingCitizens];
-  let seq = startSeq;
-
-  for (const seed of DEMO_CITIZENS_SEED) {
-    const alreadyExists = seeded.some(
-      (c) => c.username === seed.username || c.displayName === seed.displayName
-    );
-    if (alreadyExists) continue;
-
-    seq += 1;
-    const citizen: Citizen = {
-      _internalId: generateInternalId(),
-      citizenId: generateCitizenId(seq),
+function buildDemoShowcaseCitizens(): Citizen[] {
+  return DEMO_CITIZENS_SEED.map((seed, idx) => {
+    const seq = idx + 1;
+    const citizenId = `SIM-${String(seq).padStart(5, '0')}`;
+    return {
+      _internalId: `sim-${String(seq).padStart(5, '0')}`,
+      citizenId,
       ...seed,
+      isDemo: true,
     };
-    seeded.push(citizen);
+  });
+}
+
+// ---- Backend DTO Normalization ----
+
+const VALID_DISTRICTS = new Set<DistrictId>(['NEXUS', 'FORGE', 'EDEN', 'AETHER', 'BEACON', 'HAVEN']);
+const VALID_DEPARTMENTS = new Set<DepartmentId>([
+  'ENGINEERING',
+  'BIOSCIENCE',
+  'RESEARCH',
+  'SECURITY',
+  'COMMUNICATIONS',
+  'CULTURE',
+]);
+
+function normalizeDepartmentId(raw: unknown): DepartmentId {
+  if (typeof raw === 'string') {
+    const upper = raw.toUpperCase() as DepartmentId;
+    if (VALID_DEPARTMENTS.has(upper)) return upper;
+  }
+  if (raw && typeof raw === 'object') {
+    const obj = raw as Record<string, unknown>;
+    const candidate = obj.slug ?? obj.id;
+    if (typeof candidate === 'string') {
+      const upper = candidate.toUpperCase() as DepartmentId;
+      if (VALID_DEPARTMENTS.has(upper)) return upper;
+    }
+  }
+  return 'ENGINEERING';
+}
+
+function normalizeDistrictId(raw: unknown, fallbackDepartment: DepartmentId): DistrictId {
+  if (typeof raw === 'string') {
+    const upper = raw.toUpperCase() as DistrictId;
+    if (VALID_DISTRICTS.has(upper)) return upper;
+  }
+  return getDistrictForDepartment(fallbackDepartment);
+}
+
+function normalizeAchievement(raw: unknown): Achievement {
+  const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const nested =
+    obj.achievement && typeof obj.achievement === 'object'
+      ? (obj.achievement as Record<string, unknown>)
+      : obj;
+
+  const rarityRaw = typeof nested.rarity === 'string' ? nested.rarity.toLowerCase() : 'common';
+  const rarity: Achievement['rarity'] =
+    rarityRaw === 'rare' || rarityRaw === 'epic' || rarityRaw === 'legendary'
+      ? rarityRaw
+      : 'common';
+
+  return {
+    id: String(nested.slug ?? nested.id ?? 'ACHIEVEMENT'),
+    name: String(nested.name ?? 'Colony Commendation'),
+    description: String(nested.description ?? ''),
+    icon: String(nested.icon ?? 'Award'),
+    unlockedAt:
+      typeof obj.unlockedAt === 'string'
+        ? obj.unlockedAt
+        : typeof nested.unlockedAt === 'string'
+          ? nested.unlockedAt
+          : undefined,
+    rarity,
+  };
+}
+
+/**
+ * Normalizes a PostgreSQL public Citizen DTO (canonical nested or flat Prisma shape)
+ * into the frontend Citizen contract with isDemo = false.
+ */
+export function normalizeApiCitizen(raw: unknown): Citizen {
+  const obj = (raw && typeof raw === 'object' ? raw : {}) as Record<string, unknown>;
+  const department = normalizeDepartmentId(obj.department ?? obj.departmentId);
+  const districtId = normalizeDistrictId(
+    obj.districtId ?? (obj.location as Record<string, unknown> | undefined)?.districtId,
+    department
+  );
+  const rawLocation =
+    obj.location && typeof obj.location === 'object'
+      ? (obj.location as Record<string, unknown>)
+      : {};
+
+  const buildingId = String(
+    obj.buildingId ?? rawLocation.buildingId ?? 'nexus-core'
+  );
+  const x = Number(rawLocation.x ?? obj.positionX ?? 0);
+  const y = Number(rawLocation.y ?? obj.positionY ?? 0);
+  const z = Number(rawLocation.z ?? obj.positionZ ?? 0);
+  const rotationY = Number(rawLocation.rotationY ?? obj.rotationY ?? 0);
+
+  const rawStats =
+    obj.contributionStats && typeof obj.contributionStats === 'object'
+      ? (obj.contributionStats as Record<string, unknown>)
+      : {};
+
+  const rawAchievements = Array.isArray(obj.achievements) ? obj.achievements : [];
+
+  return {
+    _internalId: typeof obj._internalId === 'string' ? obj._internalId : undefined,
+    citizenId: String(obj.citizenId ?? 'LUN-00000'),
+    username: String(obj.username ?? 'citizen'),
+    displayName: String(obj.displayName ?? obj.username ?? 'Lunar Citizen'),
+    avatarUrl: typeof obj.avatarUrl === 'string' ? obj.avatarUrl : null,
+    astronautType: (typeof obj.astronautType === 'string'
+      ? obj.astronautType
+      : 'civilian') as AstronautType,
+    suitColor: typeof obj.suitColor === 'string' ? obj.suitColor : '#ffffff',
+    bio: typeof obj.bio === 'string' ? obj.bio : '',
+    department,
+    profession: String(
+      obj.profession ?? DEPARTMENTS[department].professions[0]
+    ),
+    rank: String(obj.rank ?? obj.careerRank ?? 'Citizen') as CareerRank,
+    districtId,
+    buildingId,
+    location: {
+      x: Number.isFinite(x) ? x : 0,
+      y: Number.isFinite(y) ? y : 0,
+      z: Number.isFinite(z) ? z : 0,
+      rotationY: Number.isFinite(rotationY) ? rotationY : 0,
+      districtId,
+      buildingId,
+    },
+    currentActivity: String(
+      obj.currentActivity ?? `Stationed at ${districtId} District`
+    ),
+    status: String(obj.status ?? 'ACTIVE') as CitizenStatus,
+    joinedAt:
+      typeof obj.joinedAt === 'string'
+        ? obj.joinedAt
+        : new Date().toISOString(),
+    xp: Number(obj.xp ?? 0),
+    level: Number(obj.level ?? 1),
+    colonyCredits: Number(obj.colonyCredits ?? 100),
+    achievements: rawAchievements.map(normalizeAchievement),
+    isFoundingCitizen: Boolean(obj.isFoundingCitizen),
+    isDemo: false,
+    contributionStats: {
+      missionsCompleted: Number(rawStats.missionsCompleted ?? obj.missionsCompleted ?? 0),
+      structuresContributed: Number(rawStats.structuresContributed ?? obj.structuresContributed ?? 0),
+      totalContribution: Number(rawStats.totalContribution ?? obj.totalContribution ?? 0),
+      evaSessions: Number(rawStats.evaSessions ?? obj.evaSessions ?? 0),
+      discoveryCount: Number(rawStats.discoveryCount ?? obj.discoveryCount ?? 0),
+    },
+  };
+}
+
+function unwrapPayload<T = Record<string, unknown>>(payload: unknown): T {
+  if (payload && typeof payload === 'object') {
+    const root = payload as Record<string, unknown>;
+    if (root.data && typeof root.data === 'object' && !Array.isArray(root.data)) {
+      return root.data as T;
+    }
+  }
+  return (payload ?? {}) as T;
+}
+
+// ---- Coordinate De-confliction ----
+// Real PostgreSQL citizens keep their exact server-assigned coordinates.
+// Any Demo Showcase citizen colliding within 1.5m gets a deterministic radial offset.
+
+const COLLISION_THRESHOLD_SQ = 1.5 * 1.5;
+
+export function mergeCitizensWithDemo(
+  liveCitizens: Citizen[],
+  demoCitizens: Citizen[],
+  includeDemo: boolean
+): Citizen[] {
+  const realList = liveCitizens.map((c) => ({ ...c, isDemo: false }));
+  if (!includeDemo || demoCitizens.length === 0) {
+    return realList;
   }
 
-  return [seeded, seq];
+  const placedCoords: Array<{ x: number; z: number }> = realList.map((c) => ({
+    x: c.location.x,
+    z: c.location.z,
+  }));
+
+  const deconflictedDemo = demoCitizens.map((demo, idx) => {
+    let x = demo.location.x;
+    let z = demo.location.z;
+
+    const collides = (cx: number, cz: number) =>
+      placedCoords.some((p) => {
+        const dx = cx - p.x;
+        const dz = cz - p.z;
+        return dx * dx + dz * dz < COLLISION_THRESHOLD_SQ;
+      });
+
+    if (collides(x, z)) {
+      const baseAngle = idx * 2.399963229728653; // golden angle
+      for (let ring = 1; ring <= 8; ring++) {
+        const radius = 2.2 * ring;
+        const angle = baseAngle + ring * 0.7;
+        const candidateX = Number((demo.location.x + Math.cos(angle) * radius).toFixed(2));
+        const candidateZ = Number((demo.location.z + Math.sin(angle) * radius).toFixed(2));
+        if (!collides(candidateX, candidateZ)) {
+          x = candidateX;
+          z = candidateZ;
+          break;
+        }
+      }
+    }
+
+    placedCoords.push({ x, z });
+    return {
+      ...demo,
+      isDemo: true,
+      location: {
+        ...demo.location,
+        x,
+        z,
+      },
+    };
+  });
+
+  return [...realList, ...deconflictedDemo];
 }
 
 // ============================================================
-// Citizen Service (Singleton Store)
+// Citizen Service (API-First + Demo Showcase Store)
 // ============================================================
 
 class CitizenService {
-  private citizens: Citizen[] = [];
-  private sequenceCounter: number = 0;
-  private initialized = false;
-  private listeners: Set<() => void> = new Set();
+  private readonly baseDemoCitizens: Citizen[] = buildDemoShowcaseCitizens();
+  private previewDemoCitizens: Citizen[] = [];
+  private previewSequence = 90000;
 
-  subscribe(listener: () => void): () => void {
-    this.listeners.add(listener);
-    return () => {
-      this.listeners.delete(listener);
-    };
+  getDemoCitizens(): Citizen[] {
+    return [...this.baseDemoCitizens, ...this.previewDemoCitizens];
   }
 
-  private notify() {
-    this.listeners.forEach((listener) => {
-      try {
-        listener();
-      } catch (err) {
-        console.error('Error in CitizenService listener:', err);
+  resetDemoPreview(): void {
+    this.previewDemoCitizens = [];
+    this.previewSequence = 90000;
+  }
+
+  /**
+   * Fetches real PostgreSQL citizens from GET /api/citizens (paginating if needed).
+   */
+  async fetchLiveCitizens(): Promise<Citizen[]> {
+    const collected: Citizen[] = [];
+    let page = 1;
+    let totalPages = 1;
+
+    do {
+      const res = await apiClient.get<unknown>(`/api/citizens?page=${page}&limit=100`);
+      const body = unwrapPayload<Record<string, unknown>>(res);
+      const rawList = Array.isArray(res)
+        ? res
+        : Array.isArray(body.citizens)
+          ? body.citizens
+          : Array.isArray(body.items)
+            ? body.items
+            : [];
+
+      for (const item of rawList) {
+        collected.push(normalizeApiCitizen(item));
       }
-    });
+
+      const pagination =
+        body.pagination && typeof body.pagination === 'object'
+          ? (body.pagination as Record<string, unknown>)
+          : null;
+      totalPages = pagination && typeof pagination.totalPages === 'number' ? pagination.totalPages : 1;
+      page += 1;
+    } while (page <= totalPages && page <= 10);
+
+    return collected;
   }
 
-  initialize() {
-    if (this.initialized) return;
-    this.initialized = true;
+  /**
+   * Fetches a single public citizen dossier by citizenId from GET /api/citizens/:citizenId/public.
+   */
+  async fetchPublicCitizenById(citizenId: string): Promise<Citizen | null> {
+    const trimmed = citizenId.trim();
+    if (!trimmed) return null;
 
-    this.sequenceCounter = loadSequence();
-    let stored = loadCitizens();
+    if (trimmed.toUpperCase().startsWith('SIM-')) {
+      return (
+        this.getDemoCitizens().find(
+          (c) => c.citizenId.toUpperCase() === trimmed.toUpperCase()
+        ) ?? null
+      );
+    }
 
-    // Seed demo citizens if none exist or if demo data is missing
-    const [seeded, newSeq] = seedDemoCitizens(stored, this.sequenceCounter);
-    if (seeded.length !== stored.length || newSeq !== this.sequenceCounter) {
-      this.citizens = seeded;
-      this.sequenceCounter = newSeq;
-      saveCitizens(this.citizens);
-      saveSequence(this.sequenceCounter);
-    } else {
-      this.citizens = stored;
+    try {
+      const res = await apiClient.get<unknown>(
+        `/api/citizens/${encodeURIComponent(trimmed)}/public`
+      );
+      const body = unwrapPayload<Record<string, unknown>>(res);
+      const rawCitizen =
+        body.citizen && typeof body.citizen === 'object' ? body.citizen : body;
+      return normalizeApiCitizen(rawCitizen);
+    } catch (err) {
+      if (isApiError(err) && err.status === 404) {
+        return null;
+      }
+      throw err;
     }
   }
 
-  getAll(): Citizen[] {
-    this.initialize();
-    return this.citizens;
+  /**
+   * Fetches canonical departments from GET /api/departments with static fallback.
+   */
+  async fetchDepartments(): Promise<Department[]> {
+    try {
+      const res = await apiClient.get<unknown>('/api/departments');
+      const body = unwrapPayload<Record<string, unknown>>(res);
+      const rawList = Array.isArray(res)
+        ? res
+        : Array.isArray(body.departments)
+          ? body.departments
+          : [];
+
+      if (rawList.length === 0) {
+        return Object.values(DEPARTMENTS);
+      }
+
+      return rawList.map((raw) => {
+        const obj = raw as Record<string, unknown>;
+        const id = normalizeDepartmentId(obj.slug ?? obj.id);
+        const fallback = DEPARTMENTS[id];
+        return {
+          id,
+          name: typeof obj.name === 'string' ? obj.name : fallback.name,
+          primaryDistrictId: normalizeDistrictId(
+            obj.districtId ?? obj.primaryDistrictId,
+            id
+          ),
+          description:
+            typeof obj.description === 'string'
+              ? obj.description
+              : fallback.description,
+          accentColor:
+            typeof obj.accentColor === 'string'
+              ? obj.accentColor
+              : fallback.accentColor,
+          professions: Array.isArray(obj.professions)
+            ? obj.professions.map(String)
+            : fallback.professions,
+        };
+      });
+    } catch {
+      return Object.values(DEPARTMENTS);
+    }
   }
 
-  getById(citizenId: string): Citizen | undefined {
-    this.initialize();
-    return this.citizens.find((c) => c.citizenId === citizenId);
-  }
-
-  getByUsername(username: string): Citizen | undefined {
-    this.initialize();
-    return this.citizens.find(
-      (c) => c.username.toLowerCase() === username.toLowerCase()
-    );
-  }
-
-  getByBuildingId(buildingId: string): Citizen[] {
-    this.initialize();
-    return this.citizens.filter((c) => c.buildingId === buildingId);
-  }
-
-  getByDistrict(districtId: DistrictId): Citizen[] {
-    this.initialize();
-    return this.citizens.filter((c) => c.districtId === districtId);
-  }
-
-  search(query: string): Citizen[] {
-    this.initialize();
-    const q = query.toLowerCase().trim();
-    if (!q) return this.citizens;
-    return this.citizens.filter(
-      (c) =>
-        c.citizenId.toLowerCase().includes(q) ||
-        c.username.toLowerCase().includes(q) ||
-        c.displayName.toLowerCase().includes(q) ||
-        c.profession.toLowerCase().includes(q) ||
-        c.department.toLowerCase().includes(q) ||
-        c.districtId.toLowerCase().includes(q)
-    );
-  }
-
-  isUsernameTaken(username: string, excludeId?: string): boolean {
-    this.initialize();
-    return this.citizens.some(
-      (c) =>
-        c.username.toLowerCase() === username.toLowerCase() &&
-        c.citizenId !== excludeId
-    );
-  }
-
-  register(data: {
+  /**
+   * Checks real-time PostgreSQL username availability via GET /api/citizens/check-username.
+   */
+  async checkUsernameAvailable(username: string): Promise<{
     username: string;
-    displayName: string;
-    bio: string;
-    department: DepartmentId;
-    profession: string;
-    astronautType: AstronautType;
-    suitColor: string;
-  }): Citizen {
-    this.initialize();
+    valid: boolean;
+    available: boolean;
+  }> {
+    const normalized = username.trim().toLowerCase();
+    const valid = /^[a-z0-9_]{3,20}$/.test(normalized);
+    if (!valid) {
+      return { username: normalized, valid: false, available: false };
+    }
+    const res = await apiClient.get<{
+      username: string;
+      valid: boolean;
+      available: boolean;
+    }>(`/api/citizens/check-username?username=${encodeURIComponent(normalized)}`);
+    return res;
+  }
 
-    if (this.isUsernameTaken(data.username)) {
-      throw new Error(`Username "${data.username}" is already taken.`);
+  /**
+   * Submits a real verified citizenship application to POST /api/citizenship/apply.
+   */
+  async applyForCitizenship(data: RegistrationFormData): Promise<Citizen> {
+    const payload = {
+      username: data.username.trim().toLowerCase(),
+      displayName: data.displayName.trim(),
+      bio: data.bio.trim(),
+      departmentId: data.department,
+      profession: data.profession,
+      astronautType: data.astronautType,
+      suitColor: data.suitColor,
+    };
+
+    const res = await apiClient.post<unknown>('/api/citizenship/apply', payload);
+    const body = unwrapPayload<Record<string, unknown>>(res);
+    const rawCitizen =
+      body.citizen && typeof body.citizen === 'object' ? body.citizen : body;
+    return normalizeApiCitizen(rawCitizen);
+  }
+
+  /**
+   * In-memory-only Demo Preview registration for /join sandbox (never persisted to localStorage,
+   * never issues LUN-* IDs).
+   */
+  registerDemoPreview(
+    data: RegistrationFormData,
+    existingCitizens: Citizen[] = this.getDemoCitizens()
+  ): Citizen {
+    const cleanUsername = data.username.trim().toLowerCase().replace(/\s+/g, '_');
+    const taken = existingCitizens.some(
+      (c) => c.username.toLowerCase() === cleanUsername
+    );
+    if (taken) {
+      throw new Error(`Username "${cleanUsername}" is already in use in the preview roster.`);
     }
 
     const district = getDistrictForDepartment(data.department);
-    
-    // Pick a placement slot
     const usedSlots = new Set<string>(
-      this.citizens.map((c) => `${c.location.x},${c.location.z}`)
+      existingCitizens.map((c) => `${c.location.x},${c.location.z}`)
     );
-    
     const slot = assignPlacementSlot(data.department, usedSlots);
 
-    this.sequenceCounter += 1;
-    const citizenId = generateCitizenId(this.sequenceCounter);
-
+    this.previewSequence += 1;
+    const citizenId = `SIM-${String(this.previewSequence).padStart(5, '0')}`;
     const now = new Date().toISOString();
-    const newCitizen: Citizen = {
-      _internalId: generateInternalId(),
+
+    const previewCitizen: Citizen = {
+      _internalId: `sim-${this.previewSequence}`,
       citizenId,
-      username: data.username.trim().toLowerCase().replace(/\s+/g, '_'),
+      username: cleanUsername,
       displayName: data.displayName.trim(),
       avatarUrl: null,
       astronautType: data.astronautType,
@@ -984,14 +1239,15 @@ class CitizenService {
         districtId: district,
         buildingId: slot.buildingId,
       },
-      currentActivity: `Settling in at ${district} district`,
+      currentActivity: `Demo simulation preview at ${district} District`,
       status: 'ACTIVE',
       joinedAt: now,
       xp: 0,
       level: 1,
       colonyCredits: 100,
       achievements: [],
-      isFoundingCitizen: this.citizens.length < 100,
+      isFoundingCitizen: false,
+      isDemo: true,
       contributionStats: {
         missionsCompleted: 0,
         structuresContributed: 0,
@@ -1001,29 +1257,8 @@ class CitizenService {
       },
     };
 
-    this.citizens = [...this.citizens, newCitizen];
-    saveCitizens(this.citizens);
-    saveSequence(this.sequenceCounter);
-    this.notify();
-
-    return newCitizen;
-  }
-
-  resetToDemo() {
-    try {
-      localStorage.removeItem(STORAGE_KEY);
-      localStorage.removeItem(SEQUENCE_KEY);
-    } catch {}
-    this.citizens = [];
-    this.sequenceCounter = 0;
-    this.initialized = false;
-    this.initialize();
-    this.notify();
-  }
-
-  getTotalCount(): number {
-    this.initialize();
-    return this.citizens.length;
+    this.previewDemoCitizens = [...this.previewDemoCitizens, previewCitizen];
+    return previewCitizen;
   }
 }
 

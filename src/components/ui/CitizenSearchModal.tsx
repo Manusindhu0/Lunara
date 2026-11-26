@@ -3,7 +3,6 @@ import { Search, X, User, MapPin, ArrowRight, ShieldCheck } from 'lucide-react';
 import { useColony } from '../../context/ColonyContext';
 import { CitizenData } from '../../types';
 import { DISTRICTS } from '../../data/districts';
-import { citizenService } from '../../lib/citizenService';
 
 export const CitizenSearchModal: React.FC = () => {
   const { isSearchOpen, setIsSearchOpen, citizens, selectCitizen } = useColony();
@@ -111,6 +110,11 @@ export const CitizenSearchModal: React.FC = () => {
                         <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-cyan-950 text-cyan-300 border border-cyan-800/60 font-bold">
                           {citizen.id}
                         </span>
+                        {citizen.isDemo && (
+                          <span className="text-[9px] font-mono px-1.5 py-0.5 rounded bg-amber-950/80 text-amber-300 border border-amber-800/60">
+                            DEMO
+                          </span>
+                        )}
                         <span className="text-xs font-mono text-slate-400">
                           {citizen.handle}
                         </span>
