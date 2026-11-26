@@ -45,6 +45,8 @@ export interface RegisterResult {
   user: AuthUser | null;
   message: string;
   verificationRequired: boolean;
+  emailDeliveryMode?: 'resend' | 'console' | 'disabled';
+  devVerificationUrl?: string;
 }
 
 export interface VerifyEmailResult {
@@ -181,6 +183,14 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         user: createdUser,
         message,
         verificationRequired: createdUser ? !createdUser.emailVerified : true,
+        emailDeliveryMode:
+          res?.emailDeliveryMode === 'resend' ||
+          res?.emailDeliveryMode === 'console' ||
+          res?.emailDeliveryMode === 'disabled'
+            ? res.emailDeliveryMode
+            : undefined,
+        devVerificationUrl:
+          typeof res?.devVerificationUrl === 'string' ? res.devVerificationUrl : undefined,
       };
     },
     [refreshUser]

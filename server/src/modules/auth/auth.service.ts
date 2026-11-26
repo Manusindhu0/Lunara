@@ -18,6 +18,8 @@ export interface RegisterResult {
   user: UserProfileDto;
   message: string;
   verificationRequired: boolean;
+  emailDeliveryMode?: 'resend' | 'console' | 'disabled';
+  devVerificationUrl?: string;
 }
 
 export interface VerifyEmailResult {
@@ -77,7 +79,9 @@ export const authService = {
       throw err;
     }
 
-    await emailService.sendVerificationEmail(createdUser.email, rawToken);
+    const emailResult = await emailService.sendVerificationEmail(createdUser.email, rawToken);
+    const isDevConsoleFallback =
+      env.NODE_ENV === 'development' && !env.isProduction && emailResult.mode === 'console';
 
     const userDto: UserProfileDto = {
       ...toSafeUserDto(createdUser),
@@ -89,8 +93,16 @@ export const authService = {
 
     return {
       user: userDto,
-      message: 'Account registered. Check your inbox for the verification link.',
+      message: isDevConsoleFallback
+        ? 'Account registered in Dev Console Mode (no email provider configured). Use the local verification link below or configure RESEND_API_KEY in server/.env for real email delivery.'
+        : 'Account registered. Check your inbox for the verification link.',
       verificationRequired: true,
+      emailDeliveryMode: emailResult.mode,
+      ...(isDevConsoleFallback
+        ? {
+            devVerificationUrl: `/verify-email?token=${encodeURIComponent(rawToken)}`,
+          }
+        : {}),
     };
   },
 

@@ -17,6 +17,8 @@ interface VerifyLocationState {
   email?: string;
   fromRegister?: boolean;
   message?: string;
+  emailDeliveryMode?: 'resend' | 'console' | 'disabled';
+  devVerificationUrl?: string;
 }
 
 export const VerifyEmailPage: React.FC = () => {
@@ -236,6 +238,27 @@ export const VerifyEmailPage: React.FC = () => {
             <div className="p-3.5 rounded-xl bg-cyan-950/40 border border-cyan-800/60 text-xs font-mono text-cyan-200 flex items-start gap-2.5">
               <CheckCircle2 className="w-4 h-4 text-cyan-400 shrink-0 mt-0.5" />
               <span>{statusMessage}</span>
+            </div>
+          )}
+
+          {locState.emailDeliveryMode === 'console' && locState.devVerificationUrl && (
+            <div className="p-4 rounded-xl bg-amber-950/40 border border-amber-700/60 space-y-3">
+              <div className="text-[11px] font-mono uppercase tracking-wider text-amber-300 font-semibold">
+                Dev Console Mode — No Email Provider Configured
+              </div>
+              <p className="text-xs font-mono text-amber-100/90 leading-relaxed">
+                No email was delivered to your inbox because{' '}
+                <code className="text-amber-300">RESEND_API_KEY</code> is unset in{' '}
+                <code className="text-amber-300">server/.env</code>. Use this local dev link to
+                verify your account now:
+              </p>
+              <Link
+                to={locState.devVerificationUrl}
+                className="w-full py-2.5 px-4 rounded-lg bg-amber-500 hover:bg-amber-400 text-slate-950 font-chakra text-xs font-bold tracking-wider uppercase flex items-center justify-center gap-2 transition-colors"
+              >
+                <ShieldCheck className="w-4 h-4" />
+                <span>VERIFY EMAIL NOW (DEV MODE)</span>
+              </Link>
             </div>
           )}
 

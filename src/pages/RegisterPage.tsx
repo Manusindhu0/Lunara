@@ -61,6 +61,8 @@ export const RegisterPage: React.FC = () => {
             email: normalizedEmail,
             fromRegister: true,
             message: result.message,
+            emailDeliveryMode: result.emailDeliveryMode,
+            devVerificationUrl: result.devVerificationUrl,
           },
         });
       } else {
